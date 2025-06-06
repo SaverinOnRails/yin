@@ -1,0 +1,36 @@
+const std = @import("std");
+const Scanner = @import("wayland").Scanner;
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+    const yin_daemon = b.addExecutable(.{ .name = "yin", .target = target, .optimize = optimize, .root_source_file = b.path("yin_daemon/main.zig") });
+
+    const run_step = b.step("run", "Run yin");
+    const run_yin_daemon = b.addRunArtifact(yin_daemon);
+
+    const scanner = Scanner.create(b, .{});
+
+    const wayland = b.createModule(.{ .root_source_file = scanner.result });
+    scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
+    scanner.addCustomProtocol(b.path("protocols/wlr-layer-shell-unstable-v1.xml"));
+
+    scanner.generate("wl_compositor", 4);
+    scanner.generate("wl_shm", 1);
+    scanner.generate("zwlr_layer_shell_v1", 1);
+    scanner.generate("wl_output", 4);
+    run_step.dependOn(&run_yin_daemon.step);
+
+    yin_daemon.root_module.addImport("wayland", wayland);
+    yin_daemon.linkSystemLibrary("wayland-client");
+    yin_daemon.linkLibC();
+
+    const zigimg_dependency = b.dependency("zigimg", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    yin_daemon.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+    b.installArtifact(yin_daemon);
+}
+
