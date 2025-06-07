@@ -1,6 +1,7 @@
 pub const Daemon = @This();
 const wl = @import("wayland").client.wl;
 const zwlr = @import("wayland").client.zwlr;
+const posix = std.posix;
 const std = @import("std");
 const util = @import("util.zig");
 const Output = @import("output.zig").Output;
@@ -14,13 +15,37 @@ Outputs: std.SinglyLinkedList(Output) = .{},
 //global allocator
 const allocator = util.allocator;
 
+//init and run event loop
 pub fn init() !void {
     var daemon: Daemon = .{ .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor") };
     const registry = try daemon.wlDisplay.getRegistry();
     registry.setListener(*Daemon, registry_listener, &daemon);
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
 
-    while (daemon.wlDisplay.dispatch() == .SUCCESS) {}
+    const poll_wayland = 0;
+    var pollfds: [2]posix.pollfd = undefined;
+    pollfds[poll_wayland] = .{
+        .fd = daemon.wlDisplay.getFd(),
+        .events = posix.POLL.IN,
+        .revents = 0,
+    };
+    while (true) {
+        {
+            const errno = daemon.wlDisplay.flush();
+            if (errno != .SUCCESS) {
+                std.log.err("Failed to dispatch wayland events. Exiting.", .{});
+            }
+        }
+        _ = posix.poll(&pollfds, -1) catch {};
+        if (pollfds[poll_wayland].revents & posix.POLL.IN != 0) {
+            const errno = daemon.wlDisplay.dispatch();
+            if (errno != .SUCCESS) {
+                std.log.err("failed to dispatch Wayland events", .{});
+                break;
+            }
+        }
+    }
+    _ = daemon.wlDisplay.flush();
 }
 
 fn registry_listener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
@@ -57,7 +82,17 @@ fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Ev
                 daemon.Outputs.prepend(node);
             }
         },
-        .global_remove => {},
+        .global_remove => |ev| {
+            var it = daemon.Outputs.first;
+            while (it) |node| : (it = node.next) {
+                var output = node.data;
+                if (output.wayland_name == ev.name) {
+                    output.deinit();
+                    daemon.Outputs.remove(node);
+                    allocator.destroy(node);
+                }
+            }
+        },
     }
 }
 

@@ -58,17 +58,32 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
             output.width = _c.width;
             output.height = _c.height;
             output.zwlrLayerSurface.?.ackConfigure(_c.serial);
-            const surface = output.wlSurface orelse return;
-            const buffer = Buffer.create_buffer(output) catch {
-                std.log.err("Failed to create buffer", .{});
+
+            //render
+            output.render() catch {
+                std.log.err("Failed to render to output ", .{});
                 return;
             };
-            defer buffer.destroy();
-            surface.attach(buffer, 0, 0);
-            surface.damage(0, 0, @intCast(_c.width), @intCast(_c.width));
-            surface.commit();
-            std.log.debug("Commited surface", .{});
         },
         .closed => {},
     }
+}
+
+fn render(output: *Output) !void {
+    const surface = output.wlSurface orelse return;
+    const buffer = Buffer.create_buffer(output) catch {
+        std.log.err("Failed to create buffer", .{});
+        return;
+    };
+    defer buffer.destroy();
+    surface.attach(buffer, 0, 0);
+    surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
+    surface.commit();
+}
+
+pub fn deinit(output: *Output) void {
+    //destroy globals
+    output.wlSurface.?.destroy();
+    output.wlOutput.destroy();
+    output.zwlrLayerSurface.?.destroy();
 }

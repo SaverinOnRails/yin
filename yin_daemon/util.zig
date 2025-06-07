@@ -1,1 +1,2 @@
-pub const allocator = @import("std").heap.page_allocator;
+const std = @import("std");
+pub const allocator = std.heap.page_allocator;
