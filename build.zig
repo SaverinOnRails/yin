@@ -6,9 +6,15 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const yin_daemon = b.addExecutable(.{ .name = "yin", .target = target, .optimize = optimize, .root_source_file = b.path("yin_daemon/main.zig") });
 
+    const yin_client = b.addExecutable(.{ .name = "yin_client", .target = target, .optimize = optimize, .root_source_file = b.path("yin_client/main.zig") });
+
     const run_step = b.step("run", "Run yin");
     const run_yin_daemon = b.addRunArtifact(yin_daemon);
 
+    const run_client_step = b.step("run_client", "Run the client program");
+    const run_client = b.addRunArtifact(yin_client);
+
+    run_client_step.dependOn(&run_client.step);
     const scanner = Scanner.create(b, .{});
 
     const wayland = b.createModule(.{ .root_source_file = scanner.result });
@@ -33,6 +39,10 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    if (b.args) |args| {
+        run_client.addArgs(args);
+    }
     yin_daemon.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
     b.installArtifact(yin_daemon);
+    b.installArtifact(yin_client);
 }

@@ -22,13 +22,26 @@ pub fn init() !void {
     registry.setListener(*Daemon, registry_listener, &daemon);
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
 
+    //ipc
+    const addr = try std.net.Address.initUnix("/tmp/yin");
+    var server = try addr.listen(.{});
+    const handle = server.stream.handle; //should be fd
+    defer server.deinit();
     const poll_wayland = 0;
+    const poll_ipc: comptime_int = 1;
     var pollfds: [2]posix.pollfd = undefined;
     pollfds[poll_wayland] = .{
         .fd = daemon.wlDisplay.getFd(),
         .events = posix.POLL.IN,
         .revents = 0,
     };
+
+    pollfds[poll_ipc] = .{
+        .fd = handle,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    };
+
     while (true) {
         {
             const errno = daemon.wlDisplay.flush();
@@ -43,6 +56,14 @@ pub fn init() !void {
                 std.log.err("failed to dispatch Wayland events", .{});
                 break;
             }
+        }
+        if (pollfds[poll_ipc].revents & posix.POLL.IN != 0) {
+            const conn = server.accept() catch return;
+            defer conn.stream.close();
+            var buffer: [1024]u8 = undefined;
+            const bytes_read = conn.stream.read(&buffer) catch return;
+
+            std.debug.print("Recived message {s}\n", .{buffer[0..bytes_read]});
         }
     }
     _ = daemon.wlDisplay.flush();
