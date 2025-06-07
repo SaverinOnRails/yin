@@ -59,12 +59,13 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
             output.height = _c.height;
             output.zwlrLayerSurface.?.ackConfigure(_c.serial);
             const surface = output.wlSurface orelse return;
-            const buffer =  Buffer.create_buffer(output) catch {
+            const buffer = Buffer.create_buffer(output) catch {
                 std.log.err("Failed to create buffer", .{});
                 return;
-            } ;
+            };
             defer buffer.destroy();
             surface.attach(buffer, 0, 0);
+            surface.damage(0, 0, @intCast(_c.width), @intCast(_c.width));
             surface.commit();
             std.log.debug("Commited surface", .{});
         },

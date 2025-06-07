@@ -12,6 +12,7 @@ pub fn build(b: *std.Build) void {
     const scanner = Scanner.create(b, .{});
 
     const wayland = b.createModule(.{ .root_source_file = scanner.result });
+    const pixman = b.dependency("pixman", .{}).module("pixman");
     scanner.addSystemProtocol("stable/xdg-shell/xdg-shell.xml");
     scanner.addCustomProtocol(b.path("protocols/wlr-layer-shell-unstable-v1.xml"));
 
@@ -22,7 +23,9 @@ pub fn build(b: *std.Build) void {
     run_step.dependOn(&run_yin_daemon.step);
 
     yin_daemon.root_module.addImport("wayland", wayland);
+    yin_daemon.root_module.addImport("pixman", pixman);
     yin_daemon.linkSystemLibrary("wayland-client");
+    yin_daemon.linkSystemLibrary("pixman-1");
     yin_daemon.linkLibC();
 
     const zigimg_dependency = b.dependency("zigimg", .{
@@ -33,4 +36,3 @@ pub fn build(b: *std.Build) void {
     yin_daemon.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
     b.installArtifact(yin_daemon);
 }
-

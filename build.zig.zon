@@ -48,6 +48,10 @@
             .url = "https://github.com/zigimg/zigimg/archive/refs/tags/zigimg_zig_0.14.1.tar.gz",
             .hash = "zigimg-0.1.0-8_eo2h6XEgAR6UkBiCtWECcml0gtx0oIXE3MX7sPCZof",
         },
+        .pixman = .{
+            .url = "git+https://codeberg.org/ifreund/zig-pixman#387f04a0289a69d159c88b5f70396ec12a8ddb00",
+            .hash = "pixman-0.4.0-dev-LClMn0eVAAAlXnMK-MVBZkOG0urNdOPGVQdaGecXPM5O",
+        },
     },
     .paths = .{
         "build.zig",

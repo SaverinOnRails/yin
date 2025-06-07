@@ -2,6 +2,7 @@ pub const Daemon = @This();
 const wl = @import("wayland").client.wl;
 const zwlr = @import("wayland").client.zwlr;
 const std = @import("std");
+const util = @import("util.zig");
 const Output = @import("output.zig").Output;
 
 wlDisplay: *wl.Display,
@@ -11,7 +12,7 @@ zwlrLayerShell: ?*zwlr.LayerShellV1 = null,
 Outputs: std.SinglyLinkedList(Output) = .{},
 
 //global allocator
-const allocator = std.heap.page_allocator;
+const allocator = util.allocator;
 
 pub fn init() !void {
     var daemon: Daemon = .{ .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor") };
