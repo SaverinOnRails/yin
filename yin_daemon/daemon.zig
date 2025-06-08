@@ -62,8 +62,8 @@ pub fn init() !void {
         if (pollfds[poll_ipc].revents & posix.POLL.IN != 0) {
             const conn = try server.accept();
             defer conn.stream.close();
-            const message = shared.DeserializeMessage(conn.stream.reader(),allocator) catch continue;
-            handle_ipc_message(message);
+            const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
+            daemon.handle_ipc_message(message);
         }
     }
     _ = daemon.wlDisplay.flush();
@@ -122,19 +122,26 @@ fn die(comptime format: []const u8) noreturn {
     std.posix.exit(1);
 }
 
-pub fn configure(daemon: *Daemon, path: []const u8) void {
+pub fn configure(daemon: *Daemon, render_type: shared.Message) void {
     //just render this on all outputs since i havent figured out per output yet
     var it = daemon.Outputs.first;
     while (it) |node| : (it = node.next) {
         var output = node.data;
-        output.render(path) catch return;
+        output.render(render_type) catch return;
     }
 }
 
-fn handle_ipc_message(message: shared.Message) void {
+fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
     switch (message) {
         .StaticImage => |s| {
-            std.debug.print("Located static image {s}", .{s.path});
+            util.loginfo("About to display {s} on output 1", .{s.path});
+            daemon.configure(message);
+            allocator.free(s.path);
+        },
+        .Color => |c| {
+            util.loginfo("Clear display with color {s}", .{c.hexcode});
+            daemon.configure(message);
+            allocator.free(c.hexcode);
         },
     }
 }

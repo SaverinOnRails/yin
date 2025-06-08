@@ -1,6 +1,7 @@
 const wl = @import("wayland").client.wl;
 const std = @import("std");
 const image = @import("image.zig");
+const shared = @import("shared");
 const zwlr = @import("wayland").client.zwlr;
 const Buffer = @import("Buffer.zig").Buffer;
 pub const Output = @This();
@@ -61,26 +62,48 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
             output.height = _c.height;
             output.zwlrLayerSurface.?.ackConfigure(_c.serial);
             output.configured = true;
-            //render
-            // output.render("/home/noble/Pictures/wallpapers/police, video games, Grand Theft Auto V, pixel art, explosion, Grand Theft Auto, video game art, pixels, night, PC gaming | 1920x1080 Wallpaper - wallhaven.cc.jpg") catch {
-            //     std.log.err("Failed to render to output ", .{});
-            //     return;
-            // };
         },
         .closed => {},
     }
 }
 
-pub fn render(output: *Output, path: []const u8) !void {
+pub fn render(output: *Output, render_type: shared.Message) !void {
     if (output.configured == false) {
         std.log.err("Output not configured", .{});
         return;
     }
+    switch (render_type) {
+        .StaticImage => |s| {
+            try output.render_static_image(s.path);
+        },
+        .Color => |c| {
+            try output.render_solid_color(c.hexcode);
+        },
+    }
+}
+
+fn render_static_image(output: *Output, path: []u8) !void {
     const surface = output.wlSurface orelse return;
     const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
     defer src_img.deinit();
-    const buffer = Buffer.create_buffer(output, src_img) catch {
+    const buffer = Buffer.create_static_image_buffer(output, src_img) catch {
         std.log.err("Failed to create buffer", .{});
+        return;
+    };
+    defer buffer.destroy();
+    surface.attach(buffer, 0, 0);
+    surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
+    surface.commit();
+}
+
+fn render_solid_color(output: *Output, hexcode: []u8) !void {
+    const surface = output.wlSurface orelse return;
+    const hex = std.fmt.parseInt(u32, hexcode, 16) catch {
+        std.log.err("Invalid hex code supplied", .{});
+        return;
+    };
+    const buffer = Buffer.create_solid_color_buffer(output, hex) catch {
+        std.log.err("Faield to creae buffer", .{});
         return;
     };
     defer buffer.destroy();
