@@ -8,7 +8,7 @@ const posix = std.posix;
 const wl = @import("wayland").client.wl;
 const Output = @import("output.zig").Output;
 
-pub fn create_buffer(output: *Output) !*wl.Buffer {
+pub fn create_buffer(output: *Output , src_img: *image.Image) !*wl.Buffer {
     const stride = output.width * 4;
     const size = output.height * stride;
     const scale: u32 = @intCast(output.scale);
@@ -21,8 +21,6 @@ pub fn create_buffer(output: *Output) !*wl.Buffer {
     defer shm_pool.destroy();
     const buffer = shm_pool.createBuffer(0, @intCast(output.width * scale), @intCast(output.height * scale), @intCast(stride), .argb8888);
     const data_slice: [*]u32 = @as([*]u32, @ptrCast(@alignCast(data.ptr)));
-    const src_img = try image.load_image() orelse return error.CouldNotLoadImage;
-    defer src_img.deinit();
     defer _ = src_img.src.unref();
     const dst_img = pixman.Image.createBits(.a8r8g8b8, @intCast(output.width * scale), @intCast(output.height * scale), data_slice, @intCast(stride));
     defer _ = dst_img.?.unref();

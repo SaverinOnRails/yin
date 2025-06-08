@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
     const run_client_step = b.step("run_client", "Run the client program");
     const run_client = b.addRunArtifact(yin_client);
 
+    const shared = b.addModule("shared", .{.root_source_file = b.path("shared/shared.zig")});
+
     run_client_step.dependOn(&run_client.step);
     const scanner = Scanner.create(b, .{});
 
@@ -43,6 +45,8 @@ pub fn build(b: *std.Build) void {
         run_client.addArgs(args);
     }
     yin_daemon.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
+    yin_daemon.root_module.addImport("shared", shared);
+    yin_client.root_module.addImport("shared", shared);
     b.installArtifact(yin_daemon);
     b.installArtifact(yin_client);
 }

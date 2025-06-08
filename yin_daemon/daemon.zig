@@ -23,6 +23,7 @@ pub fn init() !void {
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
 
     //ipc
+    try std.fs.deleteFileAbsolute("/tmp/yin"); //probably not the ideal way
     const addr = try std.net.Address.initUnix("/tmp/yin");
     var server = try addr.listen(.{});
     const handle = server.stream.handle; //should be fd
@@ -62,8 +63,8 @@ pub fn init() !void {
             defer conn.stream.close();
             var buffer: [1024]u8 = undefined;
             const bytes_read = conn.stream.read(&buffer) catch return;
-
-            std.debug.print("Recived message {s}\n", .{buffer[0..bytes_read]});
+            const file_path = buffer[0..bytes_read];
+            daemon.configure(file_path);
         }
     }
     _ = daemon.wlDisplay.flush();
@@ -120,4 +121,13 @@ fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Ev
 fn die(comptime format: []const u8) noreturn {
     std.log.err(format, .{});
     std.posix.exit(1);
+}
+
+pub fn configure(daemon: *Daemon, path: []const u8) void {
+    //just render this on all outputs since i havent figured out per output yet
+    var it = daemon.Outputs.first;
+    while (it) |node| : (it = node.next) {
+        var output = node.data;
+        output.render(path) catch return;
+    }
 }

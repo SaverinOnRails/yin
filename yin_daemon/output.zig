@@ -1,5 +1,6 @@
 const wl = @import("wayland").client.wl;
 const std = @import("std");
+const image = @import("image.zig");
 const zwlr = @import("wayland").client.zwlr;
 const Buffer = @import("Buffer.zig").Buffer;
 pub const Output = @This();
@@ -11,6 +12,7 @@ scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
 daemon: *Daemon,
+configured: bool = false,
 zwlrLayerSurface: ?*zwlr.LayerSurfaceV1 = null,
 pub fn setListener(output: *Output) !void {
     output.wlOutput.setListener(*Output, output_listener, output);
@@ -58,20 +60,26 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
             output.width = _c.width;
             output.height = _c.height;
             output.zwlrLayerSurface.?.ackConfigure(_c.serial);
-
+            output.configured = true;
             //render
-            output.render() catch {
-                std.log.err("Failed to render to output ", .{});
-                return;
-            };
+            // output.render("/home/noble/Pictures/wallpapers/police, video games, Grand Theft Auto V, pixel art, explosion, Grand Theft Auto, video game art, pixels, night, PC gaming | 1920x1080 Wallpaper - wallhaven.cc.jpg") catch {
+            //     std.log.err("Failed to render to output ", .{});
+            //     return;
+            // };
         },
         .closed => {},
     }
 }
 
-fn render(output: *Output) !void {
+pub fn render(output: *Output, path: []const u8) !void {
+    if (output.configured == false) {
+        std.log.err("Output not configured", .{});
+        return;
+    }
     const surface = output.wlSurface orelse return;
-    const buffer = Buffer.create_buffer(output) catch {
+    const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
+    defer src_img.deinit();
+    const buffer = Buffer.create_buffer(output, src_img) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };

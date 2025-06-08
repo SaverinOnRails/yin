@@ -3,12 +3,12 @@ const pixman = @import("pixman");
 const zigimg = @import("zigimg");
 const allocator = @import("util.zig").allocator;
 
-const Image = @This();
+pub const Image = @This();
 src: *pixman.Image,
 pixel_data: std.ArrayList(u32),
 
-pub fn load_image() !?*Image {
-    var image = try zigimg.Image.fromFilePath(allocator, "/home/noble/Pictures/wallpapers/police, video games, Grand Theft Auto V, pixel art, explosion, Grand Theft Auto, video game art, pixels, night, PC gaming | 1920x1080 Wallpaper - wallhaven.cc.jpg");
+pub fn load_image(path: []const u8) !?*Image {
+    var image = try zigimg.Image.fromFilePath(allocator, path);
     defer image.deinit();
     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
     const pixels = image.pixels.rgba32;
@@ -20,6 +20,7 @@ pub fn load_image() !?*Image {
 }
 
 pub fn deinit(image: *Image) void {
+    image.pixel_data.deinit();
     allocator.destroy(image);
 }
 
