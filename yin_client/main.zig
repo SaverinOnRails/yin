@@ -3,6 +3,7 @@ const flags = @import("flags");
 const pixman = @import("pixman");
 const shared = @import("shared");
 
+const allocator = std.heap.page_allocator;
 pub fn main() !void {
     const args = std.os.argv;
     const image_path = args[1];
@@ -11,13 +12,10 @@ pub fn main() !void {
     const msg: shared.Message = .{
         .StaticImage = .{ .path = std.mem.span(image_path) },
     };
+    var buffer = std.ArrayList(u8).init(allocator);
 
-    switch (msg) {
-        .StaticImage => |s| {
-            // var buffer: [100]u8 = undefined;
-            // const buf = try std.fmt.bufPrint(&buffer, "static-image: {s}", .{s.path});
-            _ = try stream.write(s.path);
-            stream.close();
-        },
-    }
+    try shared.SerializeMessage(msg, buffer.writer());
+    std.debug.print("{d}", .{buffer.items.len});
+    _ = try stream.write(buffer.items);
+    stream.close();
 }

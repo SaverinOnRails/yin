@@ -1,6 +1,7 @@
 pub const Daemon = @This();
 const wl = @import("wayland").client.wl;
 const zwlr = @import("wayland").client.zwlr;
+const shared = @import("shared");
 const posix = std.posix;
 const std = @import("std");
 const util = @import("util.zig");
@@ -59,12 +60,10 @@ pub fn init() !void {
             }
         }
         if (pollfds[poll_ipc].revents & posix.POLL.IN != 0) {
-            const conn = server.accept() catch return;
+            const conn = try server.accept();
             defer conn.stream.close();
-            var buffer: [1024]u8 = undefined;
-            const bytes_read = conn.stream.read(&buffer) catch return;
-            const file_path = buffer[0..bytes_read];
-            daemon.configure(file_path);
+            const message = shared.DeserializeMessage(conn.stream.reader(),allocator) catch continue;
+            handle_ipc_message(message);
         }
     }
     _ = daemon.wlDisplay.flush();
@@ -129,5 +128,13 @@ pub fn configure(daemon: *Daemon, path: []const u8) void {
     while (it) |node| : (it = node.next) {
         var output = node.data;
         output.render(path) catch return;
+    }
+}
+
+fn handle_ipc_message(message: shared.Message) void {
+    switch (message) {
+        .StaticImage => |s| {
+            std.debug.print("Located static image {s}", .{s.path});
+        },
     }
 }
