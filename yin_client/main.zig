@@ -21,6 +21,12 @@ pub fn main() !void {
         const hexcode = args[2];
         try send_hex_code(std.mem.span(hexcode), &stream);
     }
+    if (std.mem.orderZ(u8, args[1], "restore") == .eq) {
+        //restore last used image to display
+        try send_restore(&stream);
+    }
+
+    std.log.info("Request sent to Daemon", .{});
 }
 
 fn send_set_static_image(path: []u8, stream: *const std.net.Stream) !void {
@@ -37,6 +43,14 @@ fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
     const msg: shared.Message = .{
         .Color = .{ .hexcode = hexcode },
     };
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    try shared.SerializeMessage(msg, buffer.writer());
+    _ = try stream.write(buffer.items);
+}
+
+fn send_restore(stream: *const std.net.Stream) !void {
+    const msg: shared.Message = shared.Message.Restore;
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());

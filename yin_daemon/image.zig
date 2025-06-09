@@ -20,7 +20,7 @@ pub fn load_image(path: []const u8) !?*Image {
 }
 
 pub fn deinit(image: *Image) void {
-       image.pixel_data.deinit(); //destroy pixel data
+    image.pixel_data.deinit(); //destroy pixel data
     allocator.destroy(image);
 }
 

@@ -29,7 +29,7 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
             output.scale = _s.factor;
         },
         .done => {
-            if(output.zwlrLayerSurface) |_| return;
+            if (output.zwlrLayerSurface) |_| return;
             create_layer_surface(output) catch return;
         },
         .geometry => {}, //for transformation maybe?
@@ -97,18 +97,48 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
             util.loginfo("Displaying solid color with hex code {s} on display {s}", .{ c.hexcode, output_name });
             try output.render_solid_color(c.hexcode);
         },
+        .Restore => {
+            output.restore_wallpaper() catch |err| {
+                std.log.err("Could not restore wallapaper {s}", .{@errorName(err)});
+            };
+        },
     }
+}
+
+fn restore_wallpaper(output: *Output) !void {
+    const home_dir = std.posix.getenv("HOME").?;
+    const identifier = output.identifier orelse {
+        std.log.err("Output does not have identifier", .{});
+        return;
+    };
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, ".cache", "yin", identifier });
+    defer allocator.free(file_path);
+    std.debug.print("{s}", .{file_path});
+    const wallpaper_path = try std.fs.openFileAbsolute(file_path, .{});
+    defer wallpaper_path.close();
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    try buffer.resize(try wallpaper_path.getEndPos());
+
+    const bytes_read = try wallpaper_path.readAll(buffer.items);
+    const paper_path = buffer.items[0..bytes_read];
+    std.debug.print("located restore {s}", .{paper_path});
+    try output.render_static_image(paper_path);
 }
 
 fn render_static_image(output: *Output, path: []u8) !void {
     const surface = output.wlSurface orelse return;
     const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
+    std.debug.print("Finished loading image", .{});
     defer src_img.deinit();
     const buffer = Buffer.create_static_image_buffer(output, src_img) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
     defer buffer.destroy();
+    output.write_image_path_to_cache(path) catch {
+        std.log.err("Could not write to cache", .{});
+    };
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
@@ -128,6 +158,30 @@ fn render_solid_color(output: *Output, hexcode: []u8) !void {
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
+}
+
+fn write_image_path_to_cache(output: *Output, path: []u8) !void {
+    //write the name of the current image to the cache directory for restore
+    const identifier = output.identifier orelse return;
+    const home_dir = std.posix.getenv("HOME") orelse {
+        std.log.err("Home environmental variable not set", .{});
+        return;
+    };
+    const cache_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, ".cache", "yin" }); //dont see why this would fail
+    defer allocator.free(cache_path);
+    //try to create cache path
+    std.fs.makeDirAbsolute(cache_path) catch |err| {
+        switch (err) {
+            error.PathAlreadyExists => {}, //cool ,
+            else => return err,
+        }
+    };
+    const file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_path, identifier });
+    defer allocator.free(file_path);
+
+    const file = try std.fs.createFileAbsolute(file_path, .{});
+    defer file.close();
+    try file.writer().writeAll(path);
 }
 
 pub fn deinit(output: *Output) void {

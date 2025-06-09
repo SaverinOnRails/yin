@@ -104,7 +104,7 @@ fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Ev
             }
         },
         .global_remove => |ev| {
-                std.debug.print("Output is getting destroyed", .{});
+            std.debug.print("Output is getting destroyed", .{});
             var it = daemon.Outputs.first;
             while (it) |node| : (it = node.next) {
                 var output = node.data;
@@ -141,6 +141,9 @@ fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
         .Color => |c| {
             daemon.configure(message);
             allocator.free(c.hexcode);
+        },
+        .Restore => {
+            daemon.configure(message);
         },
     }
 }
