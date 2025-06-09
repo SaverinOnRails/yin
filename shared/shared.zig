@@ -38,20 +38,18 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
     switch (msg) {
         .StaticImage => {
             const len = try reader.readInt(u32, .little);
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer buffer.deinit();
-            try buffer.resize(len);
-            const bytes_read = try reader.readAll(buffer.items);
-            const path = buffer.items[0..bytes_read];
+            var buffer = try allocator.alloc(u8, len);
+            defer allocator.free(buffer);
+            const bytes_read = try reader.readAll(buffer);
+            const path = buffer[0..bytes_read];
             return Message{ .StaticImage = .{ .path = try allocator.dupe(u8, path) } };
         },
         .Color => {
             const len = try reader.readInt(u32, .little);
-            var buffer = std.ArrayList(u8).init(allocator);
-            defer buffer.deinit();
-            try buffer.resize(len);
-            const bytes_read = try reader.readAll(buffer.items);
-            const hexcode = buffer.items[0..bytes_read];
+            var buffer = try allocator.alloc(u8, len);
+            defer allocator.free(buffer);
+            const bytes_read = try reader.readAll(buffer);
+            const hexcode = buffer[0..bytes_read];
             return Message{ .Color = .{ .hexcode = try allocator.dupe(u8, hexcode) } };
         },
         .Restore => {

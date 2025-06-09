@@ -7,15 +7,42 @@ pub const Image = @This();
 src: *pixman.Image,
 pixel_data: std.ArrayList(u32),
 
+// pub fn load_image(path: []const u8) !?*Image {
+//     var image = try zigimg.Image.fromFilePath(allocator, path);
+//     defer image.deinit();
+//     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
+//     const pixels = image.pixels.rgba32;
+//     const list = try to_argb(pixels);
+//     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(image.width), @intCast(image.height), @as([*]u32, @ptrCast(@alignCast(list.items.ptr))), @intCast(image.pixelFormat().pixelStride() * image.width)) orelse return error.NoPixmanImage;
+//     const src = try allocator.create(Image);
+//     src.* = .{ .src = src_img, .pixel_data = list };
+//     return src;
+// }
+
+//load pixels from cache
 pub fn load_image(path: []const u8) !?*Image {
-    var image = try zigimg.Image.fromFilePath(allocator, path);
-    defer image.deinit();
-    if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
-    const pixels = image.pixels.rgba32;
-    const list = try to_argb(pixels);
-    const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(image.width), @intCast(image.height), @as([*]u32, @ptrCast(@alignCast(list.items.ptr))), @intCast(image.pixelFormat().pixelStride() * image.width)) orelse return error.NoPixmanImage;
+    const file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+    //read len
+    const pixel_data_len = try file.reader().readInt(u32, .little);
+    //read height
+    const height = try file.reader().readInt(u32, .little);
+    //read width
+    const width = try file.reader().readInt(u32, .little);
+    //read stride
+    const stride = try file.reader().readInt(u8, .little);
+    const bytes_to_read = pixel_data_len * 4; 
+    const pixel_bytes = try allocator.alloc(u8, bytes_to_read);
+    defer allocator.free(pixel_bytes);
+    _ = try file.reader().readAll(pixel_bytes);
+    var pixel_data = std.ArrayList(u32).init(allocator);
+    try pixel_data.resize(pixel_data_len);
+    const u32_slice = std.mem.bytesAsSlice(u32, pixel_bytes);
+    @memcpy(pixel_data.items, u32_slice);
+    std.debug.print("Diagnost speed 2", .{});
+    const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
     const src = try allocator.create(Image);
-    src.* = .{ .src = src_img, .pixel_data = list };
+    src.* = .{ .src = src_img, .pixel_data = pixel_data };
     return src;
 }
 
