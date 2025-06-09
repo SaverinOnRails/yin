@@ -1,6 +1,7 @@
 pub const std = @import("std");
 
 const MessageTags = enum(u8) { StaticImage, Color };
+
 pub const Message = union(MessageTags) {
     StaticImage: struct { path: []u8 },
     Color: struct { hexcode: []u8 },

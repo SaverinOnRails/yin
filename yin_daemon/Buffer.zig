@@ -17,9 +17,10 @@ pub fn create_static_image_buffer(output: *Output, src_img: *image.Image) !*wl.B
 
     // shm
     const fd = try posix.memfd_create("yin-background-image", 0);
+    defer posix.close(fd);
     try posix.ftruncate(fd, size);
     const data = try posix.mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, .{ .TYPE = .SHARED }, fd, 0);
-
+    defer posix.munmap(data);
     const shm_pool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shm_pool.destroy();
 
@@ -45,8 +46,10 @@ pub fn create_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
     const size = scaled_height * stride;
 
     const fd = try posix.memfd_create("yin-background-image", 0);
+    defer posix.close(fd);
     try posix.ftruncate(fd, size);
     const data = try posix.mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, .{ .TYPE = .SHARED }, fd, 0);
+    defer posix.munmap(data);
 
     const shm_pool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shm_pool.destroy();

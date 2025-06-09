@@ -1,11 +1,13 @@
 const wl = @import("wayland").client.wl;
 const std = @import("std");
+const util = @import("util.zig");
 const image = @import("image.zig");
 const shared = @import("shared");
 const zwlr = @import("wayland").client.zwlr;
 const Buffer = @import("Buffer.zig").Buffer;
 pub const Output = @This();
 pub const Daemon = @import("daemon.zig").Daemon;
+const allocator = @import("util.zig").allocator;
 wlOutput: *wl.Output,
 wlSurface: ?*wl.Surface = null,
 wayland_name: u32 = 0,
@@ -13,6 +15,8 @@ scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
 daemon: *Daemon,
+needs_reload: bool = false,
+identifier: ?[]u8 = null,
 configured: bool = false,
 zwlrLayerSurface: ?*zwlr.LayerSurfaceV1 = null,
 pub fn setListener(output: *Output) !void {
@@ -25,15 +29,24 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
             output.scale = _s.factor;
         },
         .done => {
+            if(output.zwlrLayerSurface) |_| return;
             create_layer_surface(output) catch return;
         },
-        .geometry => {},
+        .geometry => {}, //for transformation maybe?
         .mode => |_m| {
             output.height = @intCast(_m.height);
             output.width = @intCast(_m.width);
         },
         .name => {},
-        .description => {},
+        .description => |desc| {
+            //as per sway, this might break on compositors not wlroots compatible
+            const desc_span = std.mem.span(desc.description);
+            const start = std.mem.indexOf(u8, desc_span, "(") orelse return; //no exist
+            const end = std.mem.indexOf(u8, desc_span, ")") orelse return;
+            if (start > end) return;
+            const output_name = desc_span[start + 1 .. end];
+            output.identifier = allocator.dupe(u8, output_name) catch return;
+        },
     }
 }
 
@@ -63,7 +76,9 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
             output.zwlrLayerSurface.?.ackConfigure(_c.serial);
             output.configured = true;
         },
-        .closed => {},
+        .closed => {
+            std.debug.print("Layer surface is getting destroyed", .{});
+        },
     }
 }
 
@@ -72,11 +87,14 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
         std.log.err("Output not configured", .{});
         return;
     }
+    const output_name = output.identifier orelse "Not Available";
     switch (render_type) {
         .StaticImage => |s| {
+            util.loginfo("Displaying static image {s} on display {s}", .{ s.path, output_name });
             try output.render_static_image(s.path);
         },
         .Color => |c| {
+            util.loginfo("Displaying solid color with hex code {s} on display {s}", .{ c.hexcode, output_name });
             try output.render_solid_color(c.hexcode);
         },
     }
@@ -117,4 +135,5 @@ pub fn deinit(output: *Output) void {
     output.wlSurface.?.destroy();
     output.wlOutput.destroy();
     output.zwlrLayerSurface.?.destroy();
+    if (output.identifier) |id| allocator.free(id);
 }
