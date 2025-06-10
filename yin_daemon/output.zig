@@ -89,7 +89,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
     }
     const output_name = output.identifier orelse "Not Available";
     switch (render_type) {
-        .StaticImage => |s| {
+        .Image => |s| {
             util.loginfo("Displaying static image {s} on display {s}", .{ s.path, output_name });
             try output.render_static_image(s.path);
         },
@@ -113,7 +113,6 @@ fn restore_wallpaper(output: *Output) !void {
     };
     const file_path = try std.fs.path.join(allocator, &[_][]const u8{ home_dir, ".cache", "yin", identifier });
     defer allocator.free(file_path);
-    std.debug.print("{s}", .{file_path});
     const wallpaper_path = try std.fs.openFileAbsolute(file_path, .{});
     defer wallpaper_path.close();
     var buffer = std.ArrayList(u8).init(allocator);

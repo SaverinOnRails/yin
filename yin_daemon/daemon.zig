@@ -24,7 +24,7 @@ pub fn init() !void {
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
 
     //ipc
-    try std.fs.deleteFileAbsolute("/tmp/yin"); //probably not the ideal way
+    std.fs.deleteFileAbsolute("/tmp/yin") catch {};
     const addr = try std.net.Address.initUnix("/tmp/yin");
     var server = try addr.listen(.{});
     const handle = server.stream.handle; //should be fd
@@ -104,7 +104,6 @@ fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Ev
             }
         },
         .global_remove => |ev| {
-            std.debug.print("Output is getting destroyed", .{});
             var it = daemon.Outputs.first;
             while (it) |node| : (it = node.next) {
                 var output = node.data;
@@ -134,7 +133,7 @@ pub fn configure(daemon: *Daemon, render_type: shared.Message) void {
 
 fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
     switch (message) {
-        .StaticImage => |s| {
+        .Image => |s| {
             daemon.configure(message);
             allocator.free(s.path);
         },

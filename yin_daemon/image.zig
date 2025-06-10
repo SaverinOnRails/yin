@@ -7,21 +7,21 @@ pub const Image = @This();
 src: *pixman.Image,
 pixel_data: std.ArrayList(u32),
 
-// pub fn load_image(path: []const u8) !?*Image {
-//     var image = try zigimg.Image.fromFilePath(allocator, path);
-//     defer image.deinit();
-//     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
-//     const pixels = image.pixels.rgba32;
-//     const list = try to_argb(pixels);
-//     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(image.width), @intCast(image.height), @as([*]u32, @ptrCast(@alignCast(list.items.ptr))), @intCast(image.pixelFormat().pixelStride() * image.width)) orelse return error.NoPixmanImage;
-//     const src = try allocator.create(Image);
-//     src.* = .{ .src = src_img, .pixel_data = list };
-//     return src;
-// }
-
-//load pixels from cache
+//load pixels from cache, very fast
 pub fn load_image(path: []const u8) !?*Image {
     const file = try std.fs.openFileAbsolute(path, .{});
+    //determine whether it is animated or static
+    const static_or_animated_len = try file.reader().readInt(u8, .little);
+    var _buffer = try allocator.alloc(u8, static_or_animated_len);
+    defer allocator.free(_buffer);
+    const _br = try file.reader().readAll(_buffer);
+
+    if (std.mem.order(u8, _buffer[0.._br], "animated") == .eq) {
+        return load_animated_image(&file);
+    } else if (std.mem.order(u8, _buffer[0.._br], "static") != .eq) {
+        //unknown, possibly corrupted.
+        return null;
+    }
     defer file.close();
     //read len
     const pixel_data_len = try file.reader().readInt(u32, .little);
@@ -31,38 +31,69 @@ pub fn load_image(path: []const u8) !?*Image {
     const width = try file.reader().readInt(u32, .little);
     //read stride
     const stride = try file.reader().readInt(u8, .little);
-    const bytes_to_read = pixel_data_len * 4; 
+    const bytes_to_read = pixel_data_len * 4;
     const pixel_bytes = try allocator.alloc(u8, bytes_to_read);
     defer allocator.free(pixel_bytes);
     _ = try file.reader().readAll(pixel_bytes);
-    var pixel_data = std.ArrayList(u32).init(allocator);
+    var pixel_data = std.ArrayList(u32).init(allocator); //freed after buffer
     try pixel_data.resize(pixel_data_len);
     const u32_slice = std.mem.bytesAsSlice(u32, pixel_bytes);
     @memcpy(pixel_data.items, u32_slice);
-    std.debug.print("Diagnost speed 2", .{});
     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
     const src = try allocator.create(Image);
     src.* = .{ .src = src_img, .pixel_data = pixel_data };
     return src;
 }
 
+pub fn load_animated_image(file: *const std.fs.File) !?*Image {
+    defer file.close();
+    std.debug.print("Trying to load an animated image", .{});
+
+    const number_of_frames = try file.reader().readInt(u32, .little);
+    const height = try file.reader().readInt(u32, .little);
+    const width = try file.reader().readInt(u32, .little);
+    const stride = try file.reader().readInt(u8, .little);
+
+    //Go through frames
+    var frames = std.ArrayList([]align(1) u32).init(allocator); //todo: find a place to deallocate this
+    //can deinit safely after the memcopy is done, would this be fast with disk caching?
+    defer {
+        for (frames.items) |frame| {
+            allocator.free(frame);
+        }
+        frames.deinit();
+    }
+    for (0..number_of_frames) |_| {
+        const duration_length = try file.reader().readInt(u32, .little);
+        const duration_buffer = try allocator.alloc(u8, duration_length);
+        defer allocator.free(duration_buffer);
+        const br = try file.readAll(duration_buffer);
+        const duration: f32 = std.mem.bytesToValue(f32, duration_buffer[0..br]);
+        _ = duration;
+        const pixel_data_len = try file.reader().readInt(u32, .little);
+        const bytes_to_read = pixel_data_len * 4;
+        const pixel_buffer = try allocator.alloc(u8, bytes_to_read); //todo find a place to deallocate this
+        _ = try file.reader().readAll(pixel_buffer);
+        const u32_slice: []align(1) u32 = std.mem.bytesAsSlice(u32, pixel_buffer);
+        try frames.append(u32_slice);
+    }
+
+    //try to create a pixman image wih the first frame
+    const first_frame = frames.items[0];
+    var pixel_data = std.ArrayList(u32).init(allocator);
+    try pixel_data.resize(first_frame.len);
+    @memcpy(pixel_data.items, first_frame);
+
+    const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
+    const src = try allocator.create(Image);
+    src.* = .{ .src = src_img, .pixel_data = pixel_data };
+    return src;
+}
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
     allocator.destroy(image);
 }
 
-fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
-    var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);
-    for (0..pixels.len) |p| {
-        const a: u32 = @as(u32, @intCast(pixels[p].a));
-        const r: u32 = @as(u32, @intCast(pixels[p].r));
-        const g: u32 = @as(u32, @intCast(pixels[p].g));
-        const b: u32 = @as(u32, @intCast(pixels[p].b));
-        const new_pixel: u32 = (a << 24) | (r << 16) | (g << 8) | b;
-        try arraylist.append(new_pixel);
-    }
-    return arraylist;
-}
 fn calculate_scale(image_dimension: c_int, output_dimension: u32, scale: u32) f64 {
     const numerator: f64 = @floatFromInt(image_dimension);
     const denominator: f64 = @floatFromInt(output_dimension * scale);

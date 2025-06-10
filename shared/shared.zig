@@ -1,9 +1,9 @@
 pub const std = @import("std");
 
-const MessageTags = enum(u8) { StaticImage, Color, Restore };
+const MessageTags = enum(u8) { Image, Color, Restore };
 
 pub const Message = union(MessageTags) {
-    StaticImage: struct { path: []u8 },
+    Image: struct { path: []u8 },
     Color: struct { hexcode: []u8 },
     Restore,
 };
@@ -13,7 +13,7 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
     try writer.writeInt(u8, @intFromEnum(message), .little);
 
     switch (message) {
-        .StaticImage => |s| {
+        .Image => |s| {
             //write len
             try writer.writeInt(u32, @intCast(s.path.len), .little);
             //write path
@@ -36,13 +36,13 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
     const tag = try reader.readInt(u8, .little);
     const msg: MessageTags = @enumFromInt(tag);
     switch (msg) {
-        .StaticImage => {
+        .Image => {
             const len = try reader.readInt(u32, .little);
             var buffer = try allocator.alloc(u8, len);
             defer allocator.free(buffer);
             const bytes_read = try reader.readAll(buffer);
             const path = buffer[0..bytes_read];
-            return Message{ .StaticImage = .{ .path = try allocator.dupe(u8, path) } };
+            return Message{ .Image = .{ .path = try allocator.dupe(u8, path) } };
         },
         .Color => {
             const len = try reader.readInt(u32, .little);

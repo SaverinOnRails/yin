@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run yin");
     const run_yin_daemon = b.addRunArtifact(yin_daemon);
 
-    const run_client_step = b.step("run_client", "Run the client program");
+    const run_client_step = b.step("client", "Run the client program");
     const run_client = b.addRunArtifact(yin_client);
 
     const shared = b.addModule("shared", .{ .root_source_file = b.path("shared/shared.zig") });
@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) void {
     yin_daemon.linkSystemLibrary("wayland-client");
     yin_daemon.linkSystemLibrary("pixman-1");
     yin_daemon.linkLibC();
+    yin_client.linkLibC();
 
     const zigimg_dependency = b.dependency("zigimg", .{
         .target = target,
