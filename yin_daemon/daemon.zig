@@ -82,14 +82,10 @@ pub fn init() !void {
         if (pollfds[poll_timer].revents & posix.POLL.IN != 0) {
             var timer_data: u64 = undefined;
             _ = posix.read(daemon.timer_fd, std.mem.asBytes(&timer_data)) catch {};
-
-            std.debug.print("Some informatin", .{});
             var it = daemon.animations.first;
-            std.debug.print("Quick test", .{});
             while (it) |node| : (it = node.next) {
                 const output_node = daemon.Outputs.first orelse continue; //use first output for now
-                var output = output_node.data;
-                output.play_animation_frame(&node.data) catch {
+                output_node.data.play_animation_frame(&node.data) catch {
                     std.log.err("Could not play animation frame", .{});
                 };
             }

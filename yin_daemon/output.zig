@@ -130,13 +130,15 @@ fn render_image(output: *Output, path: []u8) !void {
 
     var it = output.daemon.animations.first;
     //remove animations for this output
-    while (it) |_node| : (it = _node.next) {
+    while (it) |_node| {
+        const next = _node.next;
         var anim = _node.data;
         if (anim.output_name == output.wayland_name) {
             anim.deinit();
             output.daemon.animations.remove(_node);
             allocator.destroy(_node);
         }
+        it = next;
     }
     switch (src_img) {
         .Static => |s| {
@@ -147,6 +149,7 @@ fn render_image(output: *Output, path: []u8) !void {
             node.data = s.image;
             node.data.output_name = output.wayland_name;
             output.daemon.animations.prepend(node);
+            //schedule first frame
             try s.image.set_timer_milliseconds(output.daemon.timer_fd, s.image.frames.items[0].duration);
         },
     }
@@ -216,14 +219,16 @@ pub fn deinit(output: *Output) void {
 }
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-    std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
+    // std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
 
+    var current_frame = animated_image.frames.items[animated_image.current_frame];
+    const src = try current_frame.to_image(animated_image);
+    try output.render_static_image(src);
     //increment the frame
     if (animated_image.current_frame + 1 >= animated_image.frames.items.len) {
         animated_image.current_frame = 1;
     } else {
         animated_image.current_frame += 1;
-        std.log.debug("Incrementing frame to {d}", .{animated_image.current_frame});
     }
 
     //schedule next frame
