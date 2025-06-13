@@ -3,6 +3,7 @@ const std = @import("std");
 const util = @import("util.zig");
 const image = @import("image.zig");
 const shared = @import("shared");
+const AnimatedImage = @import("animation.zig").AnimatedImage;
 const zwlr = @import("wayland").client.zwlr;
 const Buffer = @import("Buffer.zig").Buffer;
 pub const Output = @This();
@@ -91,7 +92,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
     switch (render_type) {
         .Image => |s| {
             util.loginfo("Displaying static image {s} on display {s}", .{ s.path, output_name });
-            try output.render_static_image(s.path);
+            try output.render_image(s.path);
         },
         .Color => |c| {
             util.loginfo("Displaying solid color with hex code {s} on display {s}", .{ c.hexcode, output_name });
@@ -121,28 +122,51 @@ fn restore_wallpaper(output: *Output) !void {
 
     const bytes_read = try wallpaper_path.readAll(buffer.items);
     const paper_path = buffer.items[0..bytes_read];
-    std.debug.print("located restore {s}", .{paper_path});
-    try output.render_static_image(paper_path);
+    try output.render_image(paper_path);
 }
 
-fn render_static_image(output: *Output, path: []u8) !void {
-    const surface = output.wlSurface orelse return;
+fn render_image(output: *Output, path: []u8) !void {
     const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
-    std.debug.print("Finished loading image", .{});
-    defer src_img.deinit();
-    const buffer = Buffer.create_static_image_buffer(output, src_img) catch {
+
+    var it = output.daemon.animations.first;
+    //remove animations for this output
+    while (it) |_node| : (it = _node.next) {
+        var anim = _node.data;
+        if (anim.output_name == output.wayland_name) {
+            anim.deinit();
+            output.daemon.animations.remove(_node);
+            allocator.destroy(_node);
+        }
+    }
+    switch (src_img) {
+        .Static => |s| {
+            try output.render_static_image(s.image);
+        },
+        .Animated => |s| {
+            const node = try allocator.create(std.SinglyLinkedList(AnimatedImage).Node);
+            node.data = s.image;
+            node.data.output_name = output.wayland_name;
+            output.daemon.animations.prepend(node);
+            try s.image.set_timer_milliseconds(output.daemon.timer_fd, s.image.frames.items[0].duration);
+        },
+    }
+    output.write_image_path_to_cache(path) catch {
+        std.log.err("Could not write to cache", .{});
+    };
+}
+
+fn render_static_image(output: *Output, img: *image.Image) !void {
+    defer img.deinit(); //deinit static image
+    const surface = output.wlSurface orelse return;
+    const buffer = Buffer.create_static_image_buffer(output, img) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
     defer buffer.destroy();
-    output.write_image_path_to_cache(path) catch {
-        std.log.err("Could not write to cache", .{});
-    };
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
 }
-
 fn render_solid_color(output: *Output, hexcode: []u8) !void {
     const surface = output.wlSurface orelse return;
     const hex = std.fmt.parseInt(u32, hexcode, 16) catch {
@@ -189,4 +213,19 @@ pub fn deinit(output: *Output) void {
     output.wlOutput.destroy();
     output.zwlrLayerSurface.?.destroy();
     if (output.identifier) |id| allocator.free(id);
+}
+
+pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
+    std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
+
+    //increment the frame
+    if (animated_image.current_frame + 1 >= animated_image.frames.items.len) {
+        animated_image.current_frame = 1;
+    } else {
+        animated_image.current_frame += 1;
+        std.log.debug("Incrementing frame to {d}", .{animated_image.current_frame});
+    }
+
+    //schedule next frame
+    try animated_image.set_timer_milliseconds(output.daemon.timer_fd, animated_image.frames.items[animated_image.current_frame].duration);
 }

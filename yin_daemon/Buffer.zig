@@ -31,7 +31,7 @@ pub fn create_static_image_buffer(output: *Output, src_img: *image.Image) !*wl.B
     const dst_img = pixman.Image.createBits(.a8r8g8b8, @intCast(scaled_width), @intCast(scaled_height), data_slice, @intCast(stride));
     defer _ = dst_img.?.unref();
 
-    src_img.Scale(scaled_width, scaled_height, 1); // Scale to final size, no additional scaling needed
+    src_img.Scale(scaled_width, scaled_height, 1); 
 
     pixman.Image.composite32(.src, src_img.src, null, dst_img.?, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
 
@@ -67,7 +67,6 @@ pub fn create_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
     defer _ = solid.?.unref();
 
     pixman.Image.composite32(.src, solid.?, null, dst_img.?, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
-
     return buffer;
 }
 

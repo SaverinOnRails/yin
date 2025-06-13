@@ -6,19 +6,27 @@ const posix = std.posix;
 const std = @import("std");
 const util = @import("util.zig");
 const Output = @import("output.zig").Output;
-
+const AnimatedImage = @import("animation.zig").AnimatedImage;
 wlDisplay: *wl.Display,
 wlCompositor: ?*wl.Compositor = null,
 wlShm: ?*wl.Shm = null,
 zwlrLayerShell: ?*zwlr.LayerShellV1 = null,
 Outputs: std.SinglyLinkedList(Output) = .{},
+animations: std.SinglyLinkedList(AnimatedImage) = .{},
+timer_fd: posix.fd_t, //todo, should be on animation
 
 //global allocator
 const allocator = util.allocator;
 
 //init and run event loop
 pub fn init() !void {
-    var daemon: Daemon = .{ .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor") };
+    var daemon: Daemon = .{
+        .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor"),
+        .timer_fd = posix.timerfd_create(
+            .MONOTONIC,
+            .{},
+        ) catch die("Could not create timer fd"),
+    };
     const registry = try daemon.wlDisplay.getRegistry();
     registry.setListener(*Daemon, registry_listener, &daemon);
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
@@ -31,19 +39,24 @@ pub fn init() !void {
     defer server.deinit();
     const poll_wayland = 0;
     const poll_ipc: comptime_int = 1;
-    var pollfds: [2]posix.pollfd = undefined;
+    const poll_timer = 2;
+    var pollfds: [3]posix.pollfd = undefined;
     pollfds[poll_wayland] = .{
         .fd = daemon.wlDisplay.getFd(),
         .events = posix.POLL.IN,
         .revents = 0,
     };
-
     pollfds[poll_ipc] = .{
         .fd = handle,
         .events = posix.POLL.IN,
         .revents = 0,
     };
-
+    //one timer fd for now
+    pollfds[poll_timer] = .{
+        .fd = daemon.timer_fd,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    };
     while (true) {
         {
             const errno = daemon.wlDisplay.flush();
@@ -64,6 +77,22 @@ pub fn init() !void {
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
             daemon.handle_ipc_message(message);
+        }
+        //go through animations
+        if (pollfds[poll_timer].revents & posix.POLL.IN != 0) {
+            var timer_data: u64 = undefined;
+            _ = posix.read(daemon.timer_fd, std.mem.asBytes(&timer_data)) catch {};
+
+            std.debug.print("Some informatin", .{});
+            var it = daemon.animations.first;
+            std.debug.print("Quick test", .{});
+            while (it) |node| : (it = node.next) {
+                const output_node = daemon.Outputs.first orelse continue; //use first output for now
+                var output = output_node.data;
+                output.play_animation_frame(&node.data) catch {
+                    std.log.err("Could not play animation frame", .{});
+                };
+            }
         }
     }
     _ = daemon.wlDisplay.flush();

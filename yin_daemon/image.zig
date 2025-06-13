@@ -1,14 +1,23 @@
 const std = @import("std");
 const pixman = @import("pixman");
+const Output = @import("output.zig").Output;
 const zigimg = @import("zigimg");
 const allocator = @import("util.zig").allocator;
-
+const animation = @import("animation.zig");
 pub const Image = @This();
 src: *pixman.Image,
 pixel_data: std.ArrayList(u32),
 
+const ImageResponse = union(enum) {
+    Static: struct {
+        image: *Image,
+    },
+    Animated: struct {
+        image: animation.AnimatedImage,
+    },
+};
 //load pixels from cache, very fast
-pub fn load_image(path: []const u8) !?*Image {
+pub fn load_image(path: []const u8) !?ImageResponse {
     const file = try std.fs.openFileAbsolute(path, .{});
     //determine whether it is animated or static
     const static_or_animated_len = try file.reader().readInt(u8, .little);
@@ -42,52 +51,46 @@ pub fn load_image(path: []const u8) !?*Image {
     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
     const src = try allocator.create(Image);
     src.* = .{ .src = src_img, .pixel_data = pixel_data };
-    return src;
+    return ImageResponse{ .Static = .{ .image = src } };
 }
 
-pub fn load_animated_image(file: *const std.fs.File) !?*Image {
+pub fn load_animated_image(file: *const std.fs.File) !?ImageResponse {
     defer file.close();
-    std.debug.print("Trying to load an animated image", .{});
-
     const number_of_frames = try file.reader().readInt(u32, .little);
     const height = try file.reader().readInt(u32, .little);
     const width = try file.reader().readInt(u32, .little);
     const stride = try file.reader().readInt(u8, .little);
-
+    // defer {
+    //     for (frames.items) |frame| {
+    //         allocator.free(frame);
+    //     }
+    //     frames.deinit();
+    // }
     //Go through frames
-    var frames = std.ArrayList([]align(1) u32).init(allocator); //todo: find a place to deallocate this
-    //can deinit safely after the memcopy is done, would this be fast with disk caching?
-    defer {
-        for (frames.items) |frame| {
-            allocator.free(frame);
-        }
-        frames.deinit();
-    }
+    var animation_frames = std.ArrayList(animation.AnimationFrame).init(allocator);
     for (0..number_of_frames) |_| {
         const duration_length = try file.reader().readInt(u32, .little);
         const duration_buffer = try allocator.alloc(u8, duration_length);
         defer allocator.free(duration_buffer);
         const br = try file.readAll(duration_buffer);
         const duration: f32 = std.mem.bytesToValue(f32, duration_buffer[0..br]);
-        _ = duration;
         const pixel_data_len = try file.reader().readInt(u32, .little);
         const bytes_to_read = pixel_data_len * 4;
-        const pixel_buffer = try allocator.alloc(u8, bytes_to_read); //todo find a place to deallocate this
+        const pixel_buffer = try allocator.alloc(u8, bytes_to_read);
+        defer allocator.free(pixel_buffer);
         _ = try file.reader().readAll(pixel_buffer);
-        const u32_slice: []align(1) u32 = std.mem.bytesAsSlice(u32, pixel_buffer);
-        try frames.append(u32_slice);
+        const u32_slice = std.mem.bytesAsSlice(u32, pixel_buffer);
+        var pixel_data = std.ArrayList(u32).init(allocator);
+        try pixel_data.resize(u32_slice.len);
+        @memcpy(pixel_data.items, u32_slice);
+        try animation_frames.append(.{ .pixel_data = pixel_data, .duration = duration });
     }
-
-    //try to create a pixman image wih the first frame
-    const first_frame = frames.items[0];
-    var pixel_data = std.ArrayList(u32).init(allocator);
-    try pixel_data.resize(first_frame.len);
-    @memcpy(pixel_data.items, first_frame);
-
-    const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
-    const src = try allocator.create(Image);
-    src.* = .{ .src = src_img, .pixel_data = pixel_data };
-    return src;
+    return ImageResponse{ .Animated = .{ .image = .{
+        .frames = animation_frames,
+        .height = height,
+        .width = width,
+        .stride = stride,
+    } } };
 }
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
