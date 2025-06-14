@@ -1,6 +1,6 @@
 const std = @import("std");
 const posix = std.posix;
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub const allocator = gpa.allocator();
 

@@ -131,7 +131,6 @@ fn cache_animated_image(image: *zigimg.Image, file: *const std.fs.File) !void {
     try file.writer().writeInt(u32, @intCast(image.width), .little);
     //write stride
     try file.writer().writeInt(u8, image.pixelFormat().pixelStride(), .little);
-
     for (frames) |frame| {
         //write duration
         const float_as_bytes = std.mem.asBytes(&frame.duration);

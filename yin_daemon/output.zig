@@ -5,13 +5,14 @@ const image = @import("image.zig");
 const shared = @import("shared");
 const AnimatedImage = @import("animation.zig").AnimatedImage;
 const zwlr = @import("wayland").client.zwlr;
-const Buffer = @import("Buffer.zig").Buffer;
+const PoolBuffer = @import("Buffer.zig").PoolBuffer;
 pub const Output = @This();
 pub const Daemon = @import("daemon.zig").Daemon;
 const allocator = @import("util.zig").allocator;
 wlOutput: *wl.Output,
 wlSurface: ?*wl.Surface = null,
 wayland_name: u32 = 0,
+buffer_ring: std.SinglyLinkedList(PoolBuffer) = .{},
 scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
@@ -31,6 +32,20 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
         },
         .done => {
             if (output.zwlrLayerSurface) |_| return;
+            //init buffer ring
+            for (0..2) |_| {
+                const buffer = PoolBuffer.new_buffer(output) catch {
+                    std.log.err("Could not allocate buffer", .{});
+                    std.posix.exit(1);
+                };
+                const node = allocator.create(std.SinglyLinkedList(PoolBuffer).Node) catch {
+                    std.log.err("Out of memory", .{});
+                    std.posix.exit(1);
+                };
+                node.data = buffer.?.*;
+                node.data.setListener();
+                output.buffer_ring.prepend(node);
+            }
             create_layer_surface(output) catch return;
         },
         .geometry => {}, //for transformation maybe?
@@ -88,14 +103,11 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
         std.log.err("Output not configured", .{});
         return;
     }
-    const output_name = output.identifier orelse "Not Available";
     switch (render_type) {
         .Image => |s| {
-            util.loginfo("Displaying static image {s} on display {s}", .{ s.path, output_name });
             try output.render_image(s.path);
         },
         .Color => |c| {
-            util.loginfo("Displaying solid color with hex code {s} on display {s}", .{ c.hexcode, output_name });
             try output.render_solid_color(c.hexcode);
         },
         .Restore => {
@@ -161,11 +173,11 @@ fn render_image(output: *Output, path: []u8) !void {
 fn render_static_image(output: *Output, img: *image.Image) !void {
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
-    const buffer = Buffer.create_static_image_buffer(output, img) catch {
+    const buffer = PoolBuffer.get_static_image_buffer(output, img) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
-    defer buffer.destroy();
+    // defer buffer.destroy();
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
@@ -176,7 +188,7 @@ fn render_solid_color(output: *Output, hexcode: []u8) !void {
         std.log.err("Invalid hex code supplied", .{});
         return;
     };
-    const buffer = Buffer.create_solid_color_buffer(output, hex) catch {
+    const buffer = PoolBuffer.get_solid_color_buffer(output, hex) catch {
         std.log.err("Faield to creae buffer", .{});
         return;
     };
