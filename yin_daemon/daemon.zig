@@ -13,7 +13,7 @@ wlShm: ?*wl.Shm = null,
 zwlrLayerShell: ?*zwlr.LayerShellV1 = null,
 Outputs: std.SinglyLinkedList(Output) = .{},
 animations: std.SinglyLinkedList(AnimatedImage) = .{},
-timer_fd: posix.fd_t, //todo, should be on animation
+pollfds: std.ArrayList(posix.pollfd) = undefined,
 
 //global allocator
 const allocator = util.allocator;
@@ -22,16 +22,8 @@ const allocator = util.allocator;
 pub fn init() !void {
     var daemon: Daemon = .{
         .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor"),
-        .timer_fd = posix.timerfd_create(
-            .MONOTONIC,
-            .{},
-        ) catch die("Could not create timer fd"),
     };
-    const registry = try daemon.wlDisplay.getRegistry();
-    registry.setListener(*Daemon, registry_listener, &daemon);
-    if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
 
-    //ipc
     std.fs.deleteFileAbsolute("/tmp/yin") catch {};
     const addr = try std.net.Address.initUnix("/tmp/yin");
     var server = try addr.listen(.{});
@@ -39,24 +31,23 @@ pub fn init() !void {
     defer server.deinit();
     const poll_wayland = 0;
     const poll_ipc: comptime_int = 1;
-    const poll_timer = 2;
-    var pollfds: [3]posix.pollfd = undefined;
-    pollfds[poll_wayland] = .{
+    daemon.pollfds = std.ArrayList(posix.pollfd).init(allocator);
+    defer daemon.pollfds.deinit();
+
+    try daemon.pollfds.append(.{
         .fd = daemon.wlDisplay.getFd(),
         .events = posix.POLL.IN,
         .revents = 0,
-    };
-    pollfds[poll_ipc] = .{
+    });
+    try daemon.pollfds.append(.{
         .fd = handle,
         .events = posix.POLL.IN,
         .revents = 0,
-    };
-    //one timer fd for now
-    pollfds[poll_timer] = .{
-        .fd = daemon.timer_fd,
-        .events = posix.POLL.IN,
-        .revents = 0,
-    };
+    });
+    const registry = try daemon.wlDisplay.getRegistry();
+    registry.setListener(*Daemon, registry_listener, &daemon);
+    if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
+    //ipc
     while (true) {
         {
             const errno = daemon.wlDisplay.flush();
@@ -64,26 +55,26 @@ pub fn init() !void {
                 std.log.err("Failed to dispatch wayland events. Exiting.", .{});
             }
         }
-        _ = posix.poll(&pollfds, -1) catch {};
-        if (pollfds[poll_wayland].revents & posix.POLL.IN != 0) {
+        _ = posix.poll(daemon.pollfds.items, -1) catch {};
+        if (daemon.pollfds.items[poll_wayland].revents & posix.POLL.IN != 0) {
             const errno = daemon.wlDisplay.dispatch();
             if (errno != .SUCCESS) {
                 std.log.err("failed to dispatch Wayland events", .{});
                 break;
             }
         }
-        if (pollfds[poll_ipc].revents & posix.POLL.IN != 0) {
+        if (daemon.pollfds.items[poll_ipc].revents & posix.POLL.IN != 0) {
             const conn = try server.accept();
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
             daemon.handle_ipc_message(message);
         }
         //go through animations
-        if (pollfds[poll_timer].revents & posix.POLL.IN != 0) {
-            var timer_data: u64 = undefined;
-            _ = posix.read(daemon.timer_fd, std.mem.asBytes(&timer_data)) catch {};
-            var it = daemon.animations.first;
-            while (it) |node| : (it = node.next) {
+        var it = daemon.animations.first;
+        while (it) |node| : (it = node.next) {
+            if (daemon.pollfds.items[node.data.event_index].revents & posix.POLL.IN != 0) {
+                var timer_data: u64 = undefined;
+                _ = posix.read(node.data.timer_fd, std.mem.asBytes(&timer_data)) catch {};
                 const output_node = daemon.Outputs.first orelse continue; //use first output for now
                 output_node.data.play_animation_frame(&node.data) catch {
                     std.log.err("Could not play animation frame", .{});
@@ -93,11 +84,9 @@ pub fn init() !void {
     }
     _ = daemon.wlDisplay.flush();
 }
-
 fn registry_listener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
     daemon.registry_event(registry, event) catch die("Error in registry");
 }
-
 fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Event) !void {
     switch (event) {
         .global => |ev| {

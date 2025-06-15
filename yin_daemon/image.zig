@@ -85,8 +85,10 @@ pub fn load_animated_image(file: *const std.fs.File) !?ImageResponse {
         @memcpy(pixel_data.items, u32_slice);
         try animation_frames.append(.{ .pixel_data = pixel_data, .duration = duration });
     }
+    const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
     return ImageResponse{ .Animated = .{ .image = .{
         .frames = animation_frames,
+        .timer_fd = timer_fd,
         .height = height,
         .width = width,
         .stride = stride,

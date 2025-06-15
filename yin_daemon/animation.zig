@@ -10,6 +10,8 @@ pub const AnimatedImage = struct {
     height: u32,
     width: u32,
     current_frame: u8 = 1,
+    timer_fd: posix.fd_t,
+    event_index: usize = 1,
     output_name: u32 = 0,
     stride: u8,
     pub fn deinit(image: *AnimatedImage) void {
@@ -32,6 +34,7 @@ pub const AnimatedImage = struct {
 
 pub const AnimationFrame = struct {
     pixel_data: std.ArrayList(u32),
+    image: ?*Image = null,
     duration: f32,
     pub fn to_image(self: *AnimationFrame, animated_image: *const AnimatedImage) !*Image {
         const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(animated_image.width), @intCast(animated_image.height), @as([*]u32, @ptrCast(@alignCast(self.pixel_data.items.ptr))), @intCast(animated_image.stride * animated_image.width));

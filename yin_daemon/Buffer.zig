@@ -11,15 +11,17 @@ wlBuffer: *wl.Buffer,
 height: u32,
 width: u32,
 busy: bool,
+used: bool = false,
 data: [*]u32,
 pixman_image: *pixman.Image,
-
+const MAX_BUFFERS = 4;
 pub fn get_static_image_buffer(output: *Output, src_img: *image.Image) !*wl.Buffer {
     const scale: u32 = @intCast(output.scale);
     const scaled_width = output.width * scale;
     const scaled_height = output.height * scale;
     const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
+    suitable_buffer.used = true;
     src_img.Scale(scaled_width, scaled_height, 1);
     pixman.Image.composite32(.src, src_img.src, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
     return suitable_buffer.wlBuffer;
@@ -33,10 +35,10 @@ pub fn get_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
     hex_to_pixman_color(hex, &color);
     const solid = pixman.Image.createSolidFill(&color);
     defer _ = solid.?.unref();
-
     const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height) orelse return error.NoSuitableBuffer;
-    pixman.Image.composite32(.src, solid.?, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
     suitable_buffer.busy = true;
+    suitable_buffer.used = true;
+    pixman.Image.composite32(.src, solid.?, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
     return suitable_buffer.wlBuffer;
 }
 
@@ -83,7 +85,6 @@ pub fn setListener(buffer: *PoolBuffer) void {
 fn buffer_listener(_: *wl.Buffer, event: wl.Buffer.Event, poolBuffer: *PoolBuffer) void {
     switch (event) {
         .release => {
-            std.log.debug("Releasing buffer, busy was {d}", .{@intFromBool(poolBuffer.busy)});
             poolBuffer.busy = false;
         },
     }
@@ -96,10 +97,39 @@ pub fn next_buffer(output: *Output, width: u32, height: u32) ?*PoolBuffer {
             return &node.data;
         }
     }
-    //
-    std.debug.print("No buffer available", .{});
-    return null;
+    if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
+    //create a new buffer if needed
+    return add_buffer_to_ring(output);
+}
+
+fn trimBuffers(output: *Output) void {
+    var it = output.buffer_ring.first;
+    while (it) |node| {
+        const next = node.next;
+        if (node.data.busy == false and node.data.used == true) {
+            node.data.deinit();
+            output.buffer_ring.remove(node);
+            allocator.destroy(node);
+        }
+        it = next;
+    }
 }
 pub fn deinit(poolBuffer: *PoolBuffer) void {
     poolBuffer.wlBuffer.destroy();
+    _ = poolBuffer.pixman_image.unref();
+}
+
+pub fn add_buffer_to_ring(output: *Output) *PoolBuffer {
+    const buffer = PoolBuffer.new_buffer(output) catch {
+        std.log.err("Could not allocate buffer", .{});
+        std.posix.exit(1);
+    };
+    const node = allocator.create(std.SinglyLinkedList(PoolBuffer).Node) catch {
+        std.log.err("Out of memory", .{});
+        std.posix.exit(1);
+    };
+    node.data = buffer.?.*;
+    node.data.setListener();
+    output.buffer_ring.prepend(node);
+    return &node.data;
 }

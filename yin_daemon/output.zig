@@ -34,17 +34,7 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
             if (output.zwlrLayerSurface) |_| return;
             //init buffer ring
             for (0..2) |_| {
-                const buffer = PoolBuffer.new_buffer(output) catch {
-                    std.log.err("Could not allocate buffer", .{});
-                    std.posix.exit(1);
-                };
-                const node = allocator.create(std.SinglyLinkedList(PoolBuffer).Node) catch {
-                    std.log.err("Out of memory", .{});
-                    std.posix.exit(1);
-                };
-                node.data = buffer.?.*;
-                node.data.setListener();
-                output.buffer_ring.prepend(node);
+                _ = PoolBuffer.add_buffer_to_ring(output);
             }
             create_layer_surface(output) catch return;
         },
@@ -103,6 +93,26 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
         std.log.err("Output not configured", .{});
         return;
     }
+    var it = output.daemon.animations.first;
+    //remove animations for this output
+    while (it) |_node| {
+        const next = _node.next;
+        var anim = _node.data;
+        if (anim.output_name == output.wayland_name) {
+            anim.deinit();
+            //close the timerfd
+            std.posix.close(_node.data.timer_fd);
+            // can't remove the event from the event list because it can affect other animations, so just zero out the event
+            output.daemon.pollfds.items[_node.data.event_index] = .{
+                .fd = -1,
+                .events = 0,
+                .revents = 0,
+            };
+            output.daemon.animations.remove(_node);
+            allocator.destroy(_node);
+        }
+        it = next;
+    }
     switch (render_type) {
         .Image => |s| {
             try output.render_image(s.path);
@@ -140,18 +150,6 @@ fn restore_wallpaper(output: *Output) !void {
 fn render_image(output: *Output, path: []u8) !void {
     const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
 
-    var it = output.daemon.animations.first;
-    //remove animations for this output
-    while (it) |_node| {
-        const next = _node.next;
-        var anim = _node.data;
-        if (anim.output_name == output.wayland_name) {
-            anim.deinit();
-            output.daemon.animations.remove(_node);
-            allocator.destroy(_node);
-        }
-        it = next;
-    }
     switch (src_img) {
         .Static => |s| {
             try output.render_static_image(s.image);
@@ -161,8 +159,15 @@ fn render_image(output: *Output, path: []u8) !void {
             node.data = s.image;
             node.data.output_name = output.wayland_name;
             output.daemon.animations.prepend(node);
+            // add animation fd to daemon
+            try output.daemon.pollfds.append(.{
+                .fd = node.data.timer_fd,
+                .events = std.posix.POLL.IN,
+                .revents = 0,
+            });
+            node.data.event_index = output.daemon.pollfds.items.len - 1;
             //schedule first frame
-            try s.image.set_timer_milliseconds(output.daemon.timer_fd, s.image.frames.items[0].duration);
+            try s.image.set_timer_milliseconds(node.data.timer_fd, s.image.frames.items[0].duration);
         },
     }
     output.write_image_path_to_cache(path) catch {
@@ -177,7 +182,6 @@ fn render_static_image(output: *Output, img: *image.Image) !void {
         std.log.err("Failed to create buffer", .{});
         return;
     };
-    // defer buffer.destroy();
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
@@ -192,7 +196,6 @@ fn render_solid_color(output: *Output, hexcode: []u8) !void {
         std.log.err("Faield to creae buffer", .{});
         return;
     };
-    defer buffer.destroy();
     surface.attach(buffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.commit();
@@ -232,7 +235,6 @@ pub fn deinit(output: *Output) void {
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
     // std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
-
     var current_frame = animated_image.frames.items[animated_image.current_frame];
     const src = try current_frame.to_image(animated_image);
     try output.render_static_image(src);
@@ -244,5 +246,5 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     }
 
     //schedule next frame
-    try animated_image.set_timer_milliseconds(output.daemon.timer_fd, animated_image.frames.items[animated_image.current_frame].duration);
+    try animated_image.set_timer_milliseconds(animated_image.timer_fd, animated_image.frames.items[animated_image.current_frame].duration);
 }
