@@ -18,7 +18,9 @@ const ImageResponse = union(enum) {
 };
 //load pixels from cache, very fast
 pub fn load_image(path: []const u8) !?ImageResponse {
-    const file = try std.fs.openFileAbsolute(path, .{});
+    const _file = try std.fs.openFileAbsolute(path, .{});
+    var file = try allocator.create(std.fs.File);
+    file.* = _file;
     //determine whether it is animated or static
     const static_or_animated_len = try file.reader().readInt(u8, .little);
     var _buffer = try allocator.alloc(u8, static_or_animated_len);
@@ -26,7 +28,7 @@ pub fn load_image(path: []const u8) !?ImageResponse {
     const _br = try file.reader().readAll(_buffer);
 
     if (std.mem.order(u8, _buffer[0.._br], "animated") == .eq) {
-        return load_animated_image(&file);
+        return load_animated_image(file);
     } else if (std.mem.order(u8, _buffer[0.._br], "static") != .eq) {
         //unknown, possibly corrupted.
         return null;
@@ -54,40 +56,33 @@ pub fn load_image(path: []const u8) !?ImageResponse {
     return ImageResponse{ .Static = .{ .image = src } };
 }
 
-pub fn load_animated_image(file: *const std.fs.File) !?ImageResponse {
-    defer file.close();
+pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
     const number_of_frames = try file.reader().readInt(u32, .little);
     const height = try file.reader().readInt(u32, .little);
     const width = try file.reader().readInt(u32, .little);
     const stride = try file.reader().readInt(u8, .little);
-    // defer {
-    //     for (frames.items) |frame| {
-    //         allocator.free(frame);
-    //     }
-    //     frames.deinit();
-    // }
     //Go through frames
-    var animation_frames = std.ArrayList(animation.AnimationFrame).init(allocator);
-    for (0..number_of_frames) |_| {
+    var animation_frames = try allocator.alloc(u64, number_of_frames);
+    var durations: []f32 = try allocator.alloc(f32, number_of_frames);
+    for (0..number_of_frames) |i| {
+        animation_frames[i] = try file.getPos();
         const duration_length = try file.reader().readInt(u32, .little);
+        // try file.seekBy(duration_length);
         const duration_buffer = try allocator.alloc(u8, duration_length);
         defer allocator.free(duration_buffer);
-        const br = try file.readAll(duration_buffer);
-        const duration: f32 = std.mem.bytesToValue(f32, duration_buffer[0..br]);
+        _ = try file.readAll(duration_buffer);
+        const duration = std.mem.bytesToValue(f32, duration_buffer);
+        durations[i] = duration;
         const pixel_data_len = try file.reader().readInt(u32, .little);
-        const bytes_to_read = pixel_data_len * 4;
-        const pixel_buffer = try allocator.alloc(u8, bytes_to_read);
-        defer allocator.free(pixel_buffer);
-        _ = try file.reader().readAll(pixel_buffer);
-        const u32_slice = std.mem.bytesAsSlice(u32, pixel_buffer);
-        var pixel_data = std.ArrayList(u32).init(allocator);
-        try pixel_data.resize(u32_slice.len);
-        @memcpy(pixel_data.items, u32_slice);
-        try animation_frames.append(.{ .pixel_data = pixel_data, .duration = duration });
+        const bytes_to_read = pixel_data_len * @sizeOf(u32);
+        try file.seekBy(bytes_to_read);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
+    try file.seekTo(0);
     return ImageResponse{ .Animated = .{ .image = .{
         .frames = animation_frames,
+        .file = file,
+        .durations = durations,
         .timer_fd = timer_fd,
         .height = height,
         .width = width,

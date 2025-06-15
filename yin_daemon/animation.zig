@@ -6,19 +6,21 @@ const allocator = @import("util.zig").allocator;
 const Image = @import("image.zig").Image;
 //use global allocator
 pub const AnimatedImage = struct {
-    frames: std.ArrayList(AnimationFrame),
+    frames: []u64,
+    durations: []f32,
     height: u32,
+    file: *std.fs.File,
     width: u32,
     current_frame: u8 = 1,
     timer_fd: posix.fd_t,
     event_index: usize = 1,
     output_name: u32 = 0,
     stride: u8,
-    pub fn deinit(image: *AnimatedImage) void {
-        for (image.frames.items) |frame| {
-            frame.pixel_data.deinit();
-        }
-        image.frames.deinit();
+    pub fn deinit(self: *AnimatedImage) void {
+        allocator.free(self.frames);
+        allocator.free(self.durations);
+        self.file.close();
+        allocator.destroy(self.file);
     }
 
     pub fn set_timer_milliseconds(_: AnimatedImage, timer_fd: posix.fd_t, duration: f32) !void {
@@ -30,19 +32,43 @@ pub const AnimatedImage = struct {
         };
         try posix.timerfd_settime(timer_fd, .{}, &spec, null);
     }
+
+    pub fn get_frame(self: *AnimatedImage, index: u32) !*AnimationFrame {
+        const pos = self.frames[@intCast(index)];
+        try self.file.seekTo(pos);
+        //read duration
+        const duration_length = try self.file.reader().readInt(u32, .little);
+        const duration_buffer = try allocator.alloc(u8, duration_length);
+        defer allocator.free(duration_buffer);
+        _ = try self.file.readAll(duration_buffer);
+        const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
+        const pixel_data_len = try self.file.reader().readInt(u32, .little);
+        const bytes_to_read = pixel_data_len * @sizeOf(u32);
+        const pixel_buffer = try allocator.alloc(u8, bytes_to_read);
+        defer allocator.free(pixel_buffer);
+        _ = try self.file.reader().readAll(pixel_buffer);
+        const u32_slice = std.mem.bytesAsSlice(u32, pixel_buffer);
+
+        var pixel_data = std.ArrayList(u32).init(allocator);
+        _ = try pixel_data.resize(u32_slice.len);
+        @memcpy(pixel_data.items, u32_slice);
+        const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(self.width), @intCast(self.height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(self.stride * self.width));
+        const src = try allocator.create(Image);
+        src.* = .{ .pixel_data = pixel_data, .src = src_img.? };
+        const animatedframe = try allocator.create(AnimationFrame);
+        animatedframe.* = .{ .image = src, .duration = duration };
+        return animatedframe;
+    }
 };
 
 pub const AnimationFrame = struct {
-    pixel_data: std.ArrayList(u32),
     image: ?*Image = null,
     duration: f32,
-    pub fn to_image(self: *AnimationFrame, animated_image: *const AnimatedImage) !*Image {
-        const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(animated_image.width), @intCast(animated_image.height), @as([*]u32, @ptrCast(@alignCast(self.pixel_data.items.ptr))), @intCast(animated_image.stride * animated_image.width));
-        const src = try allocator.create(Image);
 
-        //make a copy of pixel data because it is deallocated after the render and we dont want to deallocate the one here
-        const _pixel_data = try self.pixel_data.clone();
-        src.* = .{ .src = src_img.?, .pixel_data = _pixel_data };
-        return src;
+    pub fn deinit(self: *AnimationFrame) void {
+        if (self.image) |image| {
+            image.deinit();
+            allocator.destroy(image);
+        }
     }
 };

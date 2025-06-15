@@ -166,8 +166,9 @@ fn render_image(output: *Output, path: []u8) !void {
                 .revents = 0,
             });
             node.data.event_index = output.daemon.pollfds.items.len - 1;
-            //schedule first frame
-            try s.image.set_timer_milliseconds(node.data.timer_fd, s.image.frames.items[0].duration);
+            // schedule first frame
+            std.debug.print("First frame happens to be {d}",.{node.data.durations[0]});
+            try s.image.set_timer_milliseconds(node.data.timer_fd, node.data.durations[0]);
         },
     }
     output.write_image_path_to_cache(path) catch {
@@ -234,17 +235,15 @@ pub fn deinit(output: *Output) void {
 }
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-    // std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
-    var current_frame = animated_image.frames.items[animated_image.current_frame];
-    const src = try current_frame.to_image(animated_image);
-    try output.render_static_image(src);
+    const current_frame = try animated_image.get_frame(animated_image.current_frame);
+    const src = current_frame.image;
+    try output.render_static_image(src.?);
     //increment the frame
-    if (animated_image.current_frame + 1 >= animated_image.frames.items.len) {
+    if (animated_image.current_frame + 1 >= animated_image.frames.len) {
         animated_image.current_frame = 1;
     } else {
         animated_image.current_frame += 1;
     }
-
     //schedule next frame
-    try animated_image.set_timer_milliseconds(animated_image.timer_fd, animated_image.frames.items[animated_image.current_frame].duration);
+    try animated_image.set_timer_milliseconds(animated_image.timer_fd, animated_image.durations[animated_image.current_frame]);
 }
