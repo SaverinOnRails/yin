@@ -89,7 +89,6 @@ fn cache_image(path: []const u8) ![]u8 {
     const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
 
-    //just to keep things neat, animations will be moved to another method
     if (image.isAnimation()) {
         try cache_animated_image(&image, &pixel_cache_file);
         return pixel_cache_file_path;
@@ -102,8 +101,18 @@ fn cache_image(path: []const u8) ![]u8 {
     const static = "static";
     try pixel_cache_file.writer().writeInt(u8, static.len, .little);
     try pixel_cache_file.writer().writeAll(static);
-    //write len
+    //compress
+    var compressed_list = std.ArrayList(u8).init(allocator);
+    defer compressed_list.deinit();
+    var compressor = try std.compress.gzip.compressor(compressed_list.writer(), .{});
+    try compressor.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+    try compressor.finish();
+
+    const compressed_data = compressed_list.items;
+    //write original len
     try pixel_cache_file.writer().writeInt(u32, @intCast(pixel_data.items.len), .little);
+    //write compressed len
+    try pixel_cache_file.writer().writeInt(u32, @intCast(compressed_list.items.len), .little);
     //write height
     try pixel_cache_file.writer().writeInt(u32, @intCast(image.height), .little);
     std.debug.print("stride is {d}", .{image.pixelFormat().pixelStride()});
@@ -112,7 +121,7 @@ fn cache_image(path: []const u8) ![]u8 {
     //write stride
     try pixel_cache_file.writer().writeInt(u8, image.pixelFormat().pixelStride(), .little);
     //write data
-    try pixel_cache_file.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+    try pixel_cache_file.writer().writeAll(std.mem.sliceAsBytes(compressed_data));
     std.log.info("Cache Complete", .{});
     return pixel_cache_file_path;
 }
@@ -146,10 +155,18 @@ fn cache_animated_image(image: *zigimg.Image, file: *const std.fs.File) !void {
         }
         const pixel_data = try to_argb(rgba32_pixels.rgba32);
         const len = pixel_data.items.len;
-        //write length of pixel data
+        //write original length of pixel data
         try file.writer().writeInt(u32, @intCast(len), .little);
+        var compressed_list = std.ArrayList(u8).init(allocator);
+        defer compressed_list.deinit();
+        var compressor = try std.compress.gzip.compressor(compressed_list.writer(), .{});
+        try compressor.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+        try compressor.finish();
+        const compressed_data = compressed_list.items;
         //write data
-        try file.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+        //write compressed len
+        try file.writer().writeInt(u32, @intCast(compressed_list.items.len), .little);
+        try file.writer().writeAll(std.mem.sliceAsBytes(compressed_data));
     }
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {

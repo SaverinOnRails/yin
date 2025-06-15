@@ -234,9 +234,8 @@ pub fn deinit(output: *Output) void {
 }
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-    // std.log.debug("Playing frame {d} of {d} frames", .{ animated_image.current_frame, animated_image.frames.items.len });
     var current_frame = animated_image.frames.items[animated_image.current_frame];
-    const src = try current_frame.to_image(animated_image);
+    const src = try current_frame.to_image(animated_image); //todo: this is expensive to do every frame
     try output.render_static_image(src);
     //increment the frame
     if (animated_image.current_frame + 1 >= animated_image.frames.items.len) {

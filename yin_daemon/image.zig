@@ -32,20 +32,29 @@ pub fn load_image(path: []const u8) !?ImageResponse {
         return null;
     }
     defer file.close();
-    //read len
-    const pixel_data_len = try file.reader().readInt(u32, .little);
+    //read original len
+    const original_data_len = try file.reader().readInt(u32, .little);
+    //read compressed len
+    const compressed_data_len = try file.reader().readInt(u32, .little);
     //read height
     const height = try file.reader().readInt(u32, .little);
     //read width
     const width = try file.reader().readInt(u32, .little);
     //read stride
     const stride = try file.reader().readInt(u8, .little);
-    const bytes_to_read = pixel_data_len * 4;
+    const compressed_bytes_to_read = compressed_data_len * @sizeOf(u32);
+    const compressed_data = try allocator.alloc(u8, compressed_bytes_to_read);
+    defer allocator.free(compressed_data);
+    _ = try file.reader().readAll(compressed_data);
+
+    var compressed_stream = std.io.fixedBufferStream(compressed_data);
+    var decompressor = std.compress.gzip.decompressor(compressed_stream.reader());
+    const bytes_to_read = original_data_len * @sizeOf(u32);
     const pixel_bytes = try allocator.alloc(u8, bytes_to_read);
     defer allocator.free(pixel_bytes);
-    _ = try file.reader().readAll(pixel_bytes);
+    _ = try decompressor.reader().readAll(pixel_bytes);
     var pixel_data = std.ArrayList(u32).init(allocator); //freed after buffer
-    try pixel_data.resize(pixel_data_len);
+    try pixel_data.resize(original_data_len);
     const u32_slice = std.mem.bytesAsSlice(u32, pixel_bytes);
     @memcpy(pixel_data.items, u32_slice);
     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;

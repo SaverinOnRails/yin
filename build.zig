@@ -50,6 +50,7 @@ pub fn build(b: *std.Build) void {
     yin_client.root_module.addImport("zigimg", zigimg_dependency.module("zigimg"));
     yin_daemon.root_module.addImport("shared", shared);
     yin_client.root_module.addImport("shared", shared);
+    yin_client.linkSystemLibrary("lz4");
     b.installArtifact(yin_daemon);
     b.installArtifact(yin_client);
 }
