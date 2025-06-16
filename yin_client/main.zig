@@ -102,7 +102,6 @@ fn cache_image(path: []const u8) ![]u8 {
     const pixel_bytes = std.mem.sliceAsBytes(pixel_data.items);
     //write original len
     try pixel_cache_file.writer().writeInt(u32, @intCast(pixel_data.items.len), .little);
-
     //compress
     const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
     const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
@@ -157,10 +156,23 @@ fn cache_animated_image(image: *zigimg.Image, file: *const std.fs.File) !void {
         }
         const pixel_data = try to_argb(rgba32_pixels.rgba32);
         const len = pixel_data.items.len;
-        //write length of pixel data
+        //write original length of pixel data
         try file.writer().writeInt(u32, @intCast(len), .little);
+        //compress this frame, i should really stop repeating this code
+        const pixel_bytes = std.mem.sliceAsBytes(pixel_data.items);
+        const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
+        const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
+        const compressed_size = lz4.LZ4_compress_default(
+            @ptrCast(@alignCast(pixel_bytes.ptr)),
+            @ptrCast(@alignCast(compressed_buffer.ptr)),
+            @intCast(pixel_bytes.len),
+            @intCast(max_compressed_size),
+        );
+        defer allocator.free(compressed_buffer);
+        //write compressed length
+        try file.writer().writeInt(u32, @intCast(compressed_size), .little);
         //write data
-        try file.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+        try file.writer().writeAll(compressed_buffer[0..@intCast(compressed_size)]);
     }
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {

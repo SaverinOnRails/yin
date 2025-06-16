@@ -88,8 +88,9 @@ pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
         _ = try file.readAll(duration_buffer);
         const duration = std.mem.bytesToValue(f32, duration_buffer);
         durations[i] = duration;
-        const pixel_data_len = try file.reader().readInt(u32, .little);
-        const bytes_to_read = pixel_data_len * @sizeOf(u32);
+        _ = try file.reader().readInt(u32, .little);
+        const compressed_len = try file.reader().readInt(u32, .little);
+        const bytes_to_read = compressed_len;
         try file.seekBy(bytes_to_read);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});

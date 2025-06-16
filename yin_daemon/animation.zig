@@ -1,4 +1,5 @@
 const std = @import("std");
+const lz4 = @import("shared").lz4;
 const posix = std.posix;
 const pixman = @import("pixman");
 const Output = @import("output.zig").Output;
@@ -42,16 +43,25 @@ pub const AnimatedImage = struct {
         defer allocator.free(duration_buffer);
         _ = try self.file.readAll(duration_buffer);
         const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
-        const pixel_data_len = try self.file.reader().readInt(u32, .little);
-        const bytes_to_read = pixel_data_len * @sizeOf(u32);
-        const pixel_buffer = try allocator.alloc(u8, bytes_to_read);
-        defer allocator.free(pixel_buffer);
-        _ = try self.file.reader().readAll(pixel_buffer);
-        const u32_slice = std.mem.bytesAsSlice(u32, pixel_buffer);
+        const original_pixel_len = try self.file.reader().readInt(u32, .little);
+        const compressed_pixel_len = try self.file.reader().readInt(u32, .little);
+        const compressed_buffer = try allocator.alloc(u8, compressed_pixel_len);
+        defer allocator.free(compressed_buffer);
+        _ = try self.file.reader().readAll(compressed_buffer);
+        const decompressed_buffer = try allocator.alloc(u8, original_pixel_len * @sizeOf(u32));
+        defer allocator.free(decompressed_buffer);
+        const decompressed_size = lz4.LZ4_decompress_safe(
+            @ptrCast(@alignCast(compressed_buffer.ptr)),
+            @ptrCast(@alignCast(decompressed_buffer.ptr)),
+            @intCast(compressed_buffer.len),
+            @intCast(decompressed_buffer.len),
+        );
+        const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
+        const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
 
         var pixel_data = std.ArrayList(u32).init(allocator);
-        _ = try pixel_data.resize(u32_slice.len);
-        @memcpy(pixel_data.items, u32_slice);
+        _ = try pixel_data.resize(decompressed_data.len);
+        @memcpy(pixel_data.items, decompressed_data);
         const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(self.width), @intCast(self.height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(self.stride * self.width));
         const src = try allocator.create(Image);
         src.* = .{ .pixel_data = pixel_data, .src = src_img.? };
