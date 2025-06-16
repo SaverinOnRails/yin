@@ -97,9 +97,9 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
     //remove animations for this output
     while (it) |_node| {
         const next = _node.next;
-        var anim = _node.data;
+        const anim = _node.data;
         if (anim.output_name == output.wayland_name) {
-            anim.deinit();
+            _node.data.deinit();
             //close the timerfd
             std.posix.close(_node.data.timer_fd);
             // can't remove the event from the event list because it can affect other animations, so just zero out the event
@@ -236,6 +236,7 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     const current_frame = try animated_image.get_frame(animated_image.current_frame);
     const src = current_frame.image;
     try output.render_static_image(src.?);
+    current_frame.deinit();
     //increment the frame
     if (animated_image.current_frame + 1 >= animated_image.frames.len) {
         animated_image.current_frame = 1;

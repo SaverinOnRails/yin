@@ -107,6 +107,7 @@ pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
 }
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
+    _ = image.src.unref();
     allocator.destroy(image);
 }
 

@@ -117,6 +117,7 @@ fn trimBuffers(output: *Output) void {
 pub fn deinit(poolBuffer: *PoolBuffer) void {
     poolBuffer.wlBuffer.destroy();
     _ = poolBuffer.pixman_image.unref();
+    allocator.destroy(poolBuffer);
 }
 
 pub fn add_buffer_to_ring(output: *Output) *PoolBuffer {

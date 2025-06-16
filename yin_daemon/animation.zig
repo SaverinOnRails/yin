@@ -22,6 +22,7 @@ pub const AnimatedImage = struct {
         allocator.free(self.durations);
         self.file.close();
         allocator.destroy(self.file);
+        allocator.destroy(self);
     }
 
     pub fn set_timer_milliseconds(_: AnimatedImage, timer_fd: posix.fd_t, duration: f32) !void {
@@ -70,15 +71,10 @@ pub const AnimatedImage = struct {
         return animatedframe;
     }
 };
-
 pub const AnimationFrame = struct {
-    image: ?*Image = null,
+    image: ?*Image = null, //this will get released after a render, so we cannot release it here to prevent double free
     duration: f32,
-
     pub fn deinit(self: *AnimationFrame) void {
-        if (self.image) |image| {
-            image.deinit();
-            allocator.destroy(image);
-        }
+        allocator.destroy(self);
     }
 };
