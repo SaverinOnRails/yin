@@ -1,5 +1,6 @@
 const std = @import("std");
 const pixman = @import("pixman");
+const lz4 = @import("shared").lz4;
 const Output = @import("output.zig").Output;
 const zigimg = @import("zigimg");
 const allocator = @import("util.zig").allocator;
@@ -34,22 +35,36 @@ pub fn load_image(path: []const u8) !?ImageResponse {
         return null;
     }
     defer file.close();
-    //read len
-    const pixel_data_len = try file.reader().readInt(u32, .little);
+    //read original
+    const original_len = try file.reader().readInt(u32, .little);
+    //read compressed len
+    const compressed_len = try file.reader().readInt(u32, .little);
     //read height
     const height = try file.reader().readInt(u32, .little);
     //read width
     const width = try file.reader().readInt(u32, .little);
     //read stride
     const stride = try file.reader().readInt(u8, .little);
-    const bytes_to_read = pixel_data_len * 4;
-    const pixel_bytes = try allocator.alloc(u8, bytes_to_read);
-    defer allocator.free(pixel_bytes);
-    _ = try file.reader().readAll(pixel_bytes);
-    var pixel_data = std.ArrayList(u32).init(allocator); //freed after buffer
-    try pixel_data.resize(pixel_data_len);
-    const u32_slice = std.mem.bytesAsSlice(u32, pixel_bytes);
-    @memcpy(pixel_data.items, u32_slice);
+    //read data
+    const bytes_to_read = compressed_len;
+    const compressed_data_buffer = try allocator.alloc(u8, bytes_to_read);
+    defer allocator.free(compressed_data_buffer);
+
+    _ = try file.reader().readAll(compressed_data_buffer);
+    const original_size: u32 = original_len * @sizeOf(u32);
+    const decompressed_buffer = try allocator.alloc(u8, original_size);
+    defer allocator.free(decompressed_buffer);
+    const decompressed_size = lz4.LZ4_decompress_safe(
+        @ptrCast(@alignCast(compressed_data_buffer.ptr)),
+        @ptrCast(@alignCast(decompressed_buffer.ptr)),
+        @intCast(compressed_data_buffer.len),
+        @intCast(decompressed_buffer.len),
+    );
+    const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
+    const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
+    var pixel_data = std.ArrayList(u32).init(allocator);
+    try pixel_data.resize(decompressed_data.len);
+    @memcpy(pixel_data.items, decompressed_data);
     const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
     const src = try allocator.create(Image);
     src.* = .{ .src = src_img, .pixel_data = pixel_data };

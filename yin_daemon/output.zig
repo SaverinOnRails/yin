@@ -149,7 +149,6 @@ fn restore_wallpaper(output: *Output) !void {
 
 fn render_image(output: *Output, path: []u8) !void {
     const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
-
     switch (src_img) {
         .Static => |s| {
             try output.render_static_image(s.image);
@@ -167,7 +166,6 @@ fn render_image(output: *Output, path: []u8) !void {
             });
             node.data.event_index = output.daemon.pollfds.items.len - 1;
             // schedule first frame
-            std.debug.print("First frame happens to be {d}",.{node.data.durations[0]});
             try s.image.set_timer_milliseconds(node.data.timer_fd, node.data.durations[0]);
         },
     }

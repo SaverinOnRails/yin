@@ -1,5 +1,5 @@
 pub const std = @import("std");
-
+pub const lz4 = @import("lz4");
 const MessageTags = enum(u8) { Image, Color, Restore };
 
 pub const Message = union(MessageTags) {

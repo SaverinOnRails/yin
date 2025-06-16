@@ -3,7 +3,7 @@ const flags = @import("flags");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
 const shared = @import("shared");
-
+const lz4 = shared.lz4;
 const allocator = std.heap.c_allocator;
 pub fn main() !void {
     const args = std.os.argv;
@@ -11,7 +11,6 @@ pub fn main() !void {
         std.log.err("Could not connect to Yin daemon. Please ensure it is running before attempting to use IPC", .{});
         std.posix.exit(1);
     };
-
     defer stream.close();
     if (std.mem.orderZ(u8, args[1], "img") == .eq) {
         const image_path = args[2];
@@ -69,7 +68,6 @@ fn send_restore(stream: *const std.net.Stream) !void {
     _ = try stream.write(buffer.items);
 }
 
-//cache static image, just trying random bullshit here, try to write all of the pixel data to a cache file
 fn cache_image(path: []const u8) ![]u8 {
     std.log.info("Caching image", .{});
     var image = try zigimg.Image.fromFilePath(allocator, path);
@@ -89,7 +87,6 @@ fn cache_image(path: []const u8) ![]u8 {
     const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
 
-    //just to keep things neat, animations will be moved to another method
     if (image.isAnimation()) {
         try cache_animated_image(&image, &pixel_cache_file);
         return pixel_cache_file_path;
@@ -102,8 +99,22 @@ fn cache_image(path: []const u8) ![]u8 {
     const static = "static";
     try pixel_cache_file.writer().writeInt(u8, static.len, .little);
     try pixel_cache_file.writer().writeAll(static);
-    //write len
+    const pixel_bytes = std.mem.sliceAsBytes(pixel_data.items);
+    //write original len
     try pixel_cache_file.writer().writeInt(u32, @intCast(pixel_data.items.len), .little);
+
+    //compress
+    const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
+    const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
+    defer allocator.free(compressed_buffer);
+    const compressed_size = lz4.LZ4_compress_default(
+        @ptrCast(@alignCast(pixel_bytes.ptr)),
+        @ptrCast(@alignCast(compressed_buffer.ptr)),
+        @intCast(pixel_bytes.len),
+        @intCast(max_compressed_size),
+    );
+    //write compressed len
+    try pixel_cache_file.writer().writeInt(u32, @intCast(compressed_size), .little);
     //write height
     try pixel_cache_file.writer().writeInt(u32, @intCast(image.height), .little);
     std.debug.print("stride is {d}", .{image.pixelFormat().pixelStride()});
@@ -112,7 +123,7 @@ fn cache_image(path: []const u8) ![]u8 {
     //write stride
     try pixel_cache_file.writer().writeInt(u8, image.pixelFormat().pixelStride(), .little);
     //write data
-    try pixel_cache_file.writer().writeAll(std.mem.sliceAsBytes(pixel_data.items));
+    try pixel_cache_file.writer().writeAll(compressed_buffer[0..@intCast(compressed_size)]);
     std.log.info("Cache Complete", .{});
     return pixel_cache_file_path;
 }
