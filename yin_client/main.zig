@@ -26,6 +26,14 @@ pub fn main() !void {
         //restore last used image to display
         try send_restore(&stream);
     }
+    if (std.mem.orderZ(u8, args[1], "pause") == .eq) {
+        //restore last used image to display
+        try send_toggle_play(false, &stream);
+    }
+    if (std.mem.orderZ(u8, args[1], "play") == .eq) {
+        //restore last used image to display
+        try send_toggle_play(true, &stream);
+    }
 
     std.log.info("Request sent to Daemon", .{});
 }
@@ -62,6 +70,19 @@ fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
 
 fn send_restore(stream: *const std.net.Stream) !void {
     const msg: shared.Message = shared.Message.Restore;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    try shared.SerializeMessage(msg, buffer.writer());
+    _ = try stream.write(buffer.items);
+}
+
+fn send_toggle_play(play: bool, stream: *const std.net.Stream) !void {
+    var msg: shared.Message = undefined;
+    if (play == true) {
+        msg = shared.Message.Play;
+    } else {
+        msg = shared.Message.Pause;
+    }
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());

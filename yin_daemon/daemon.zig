@@ -136,7 +136,7 @@ fn die(comptime format: []const u8) noreturn {
     std.posix.exit(1);
 }
 
-pub fn configure(daemon: *Daemon, render_type: shared.Message) void {
+fn configure(daemon: *Daemon, render_type: shared.Message) void {
     //just render this on all outputs since i havent figured out per output yet
     var it = daemon.Outputs.first;
     while (it) |node| : (it = node.next) {
@@ -145,6 +145,23 @@ pub fn configure(daemon: *Daemon, render_type: shared.Message) void {
     }
 }
 
+fn toggle_play(daemon: *Daemon, play: bool) void {
+    //do this on all outputs for now
+    var it = daemon.Outputs.first;
+    while (it) |node| : (it = node.next) {
+        node.data.paused = !play;
+        //resume the animation, there has to be a much better way to do this
+        if (!node.data.paused) {
+            const output_name = node.data.wayland_name;
+            var _it = daemon.animations.first;
+            while (_it) |_node| : (_it = _node.next) {
+                if (_node.data.output_name == output_name) {
+                    node.data.play_animation_frame(&_node.data) catch return;
+                }
+            }
+        }
+    }
+}
 fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
     switch (message) {
         .Image => |s| {
@@ -157,6 +174,12 @@ fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
         },
         .Restore => {
             daemon.configure(message);
+        },
+        .Pause => {
+            daemon.toggle_play(false);
+        },
+        .Play => {
+            daemon.toggle_play(true);
         },
     }
 }

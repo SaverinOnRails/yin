@@ -17,6 +17,7 @@ scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
 daemon: *Daemon,
+paused: bool = false,
 needs_reload: bool = false,
 identifier: ?[]u8 = null,
 configured: bool = false,
@@ -125,6 +126,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
                 std.log.err("Could not restore wallapaper {s}", .{@errorName(err)});
             };
         },
+        else => {},
     }
 }
 
@@ -244,5 +246,6 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
         animated_image.current_frame += 1;
     }
     //schedule next frame
+    if (output.paused == true) return;
     try animated_image.set_timer_milliseconds(animated_image.timer_fd, animated_image.durations[animated_image.current_frame]);
 }

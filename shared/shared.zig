@@ -1,11 +1,13 @@
 pub const std = @import("std");
 pub const lz4 = @import("lz4");
-const MessageTags = enum(u8) { Image, Color, Restore };
+const MessageTags = enum(u8) { Image, Color, Restore, Pause, Play };
 
 pub const Message = union(MessageTags) {
     Image: struct { path: []u8 },
     Color: struct { hexcode: []u8 },
     Restore,
+    Pause,
+    Play,
 };
 
 pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !void {
@@ -26,6 +28,12 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
             try writer.writeAll(c.hexcode);
         },
         .Restore => {
+            //nothing to write
+        },
+        .Pause => {
+            //nothing to write
+        },
+        .Play => {
             //nothing to write
         },
     }
@@ -55,6 +63,14 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
         .Restore => {
             //nothing to read
             return Message.Restore;
+        },
+        .Pause => {
+            //nothing to read
+            return Message.Pause;
+        },
+        .Play => {
+            //nothing to read
+            return Message.Play;
         },
     }
 }

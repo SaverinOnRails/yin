@@ -22,7 +22,7 @@ pub const AnimatedImage = struct {
         allocator.free(self.durations);
         self.file.close();
         allocator.destroy(self.file);
-        allocator.destroy(self);
+        // allocator.destroy(self); //check why this fails
     }
 
     pub fn set_timer_milliseconds(_: AnimatedImage, timer_fd: posix.fd_t, duration: f32) !void {
