@@ -12,7 +12,7 @@ pub const AnimatedImage = struct {
     height: u32,
     file: *std.fs.File,
     width: u32,
-    current_frame: u8 = 1,
+    current_frame: u32 = 1,
     timer_fd: posix.fd_t,
     event_index: usize = 1,
     output_name: u32 = 0,
