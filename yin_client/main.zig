@@ -5,39 +5,79 @@ const zigimg = @import("zigimg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
 const allocator = std.heap.c_allocator;
+const Arguments = struct {
+    img: ?[]u8 = null,
+    color: ?[]u8 = null,
+    restore: ?bool = null,
+    pause: ?bool = null,
+    play: ?bool = null,
+};
+
+fn parse_args() !Arguments {
+    const argv = std.os.argv;
+    var args: Arguments = .{};
+    for (argv, 0..) |arg, i| {
+        const arg_span = std.mem.span(arg);
+        if (std.mem.order(u8, arg_span, "--img") == .eq) {
+            if (i + 1 >= argv.len) {
+                std.log.err("Image not provided to  --img flag", .{});
+                return error.NoImage;
+            }
+            args.img = std.mem.span(argv[i + 1]);
+        }
+        if (std.mem.order(u8, arg_span, "--color") == .eq) {
+            if (i + 1 >= argv.len) {
+                std.log.err("Hex color not provided to --color flag", .{});
+                return error.NoColor;
+            }
+            args.color = std.mem.span(argv[i + 1]);
+        }
+        if (std.mem.order(u8, arg_span, "--restore") == .eq) {
+            args.restore = true;
+        }
+        if (std.mem.order(u8, arg_span, "--pause") == .eq) {
+            args.pause = true;
+        }
+        if (std.mem.order(u8, arg_span, "--play") == .eq) {
+            args.play = true;
+        }
+    }
+    return args;
+}
 pub fn main() !void {
-    const args = std.os.argv;
+    const args = try parse_args();
     const stream = std.net.connectUnixSocket("/tmp/yin") catch {
         std.log.err("Could not connect to Yin daemon. Please ensure it is running before attempting to use IPC", .{});
         std.posix.exit(1);
     };
-    defer stream.close();
-    if (std.mem.orderZ(u8, args[1], "img") == .eq) {
-        const image_path = args[2];
-        try send_set_image(std.mem.span(image_path), &stream);
-        // try cache_static_image(std.mem.span(image_path));
-    }
-    if (std.mem.orderZ(u8, args[1], "color") == .eq) {
-        //clear an arbitrary color onto the display
-        const hexcode = args[2];
-        try send_hex_code(std.mem.span(hexcode), &stream);
-    }
-    if (std.mem.orderZ(u8, args[1], "restore") == .eq) {
-        //restore last used image to display
-        try send_restore(&stream);
-    }
-    if (std.mem.orderZ(u8, args[1], "pause") == .eq) {
-        //restore last used image to display
+    if (args.img) |img| {
+        try send_set_image(img, &stream);
+    } else if (args.color) |color| {
+        try send_hex_code(color, &stream);
+    } else if (args.restore) |restore| {
+        if (restore) try send_restore(&stream);
+    } else if (args.pause) |_| {
         try send_toggle_play(false, &stream);
-    }
-    if (std.mem.orderZ(u8, args[1], "play") == .eq) {
-        //restore last used image to display
+    } else if (args.play) |_| {
         try send_toggle_play(true, &stream);
+    } else {
+        print_help();
     }
-
+    defer stream.close();
     std.log.info("Request sent to Daemon", .{});
 }
-
+fn print_help() void {
+    const help =
+        \\ Yin, An efficient wallpaper daemon for Wayland Compositors
+        \\ --img:                             Pass an image or animated gif for the daemon to display
+        \\ --color:                           Pass a hexcode to clear onto the display
+        \\ --restore                          Restore the previous set wallpaper
+        \\ --pause                            Pause an animated gif on the output
+        \\ --play                             Play or resume an animated gif on the output
+    ;
+    std.debug.print(help, .{});
+    std.posix.exit(1);
+}
 fn send_set_image(path: []u8, stream: *const std.net.Stream) !void {
     //check if a cache file fot this exists
     const safe_name = try sanitizeForFilename(path);
