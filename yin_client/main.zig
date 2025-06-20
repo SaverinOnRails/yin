@@ -1,10 +1,11 @@
 const std = @import("std");
 const flags = @import("flags");
+const libgif = @import("libgif.zig");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
-const allocator = std.heap.c_allocator;
+const allocator = libgif.allocator;
 const Arguments = struct {
     img: ?[]u8 = null,
     color: ?[]u8 = null,
@@ -68,7 +69,7 @@ pub fn main() !void {
 }
 fn print_help() void {
     const help =
-        \\ Yin, An efficient wallpaper daemon for Wayland Compositors
+        \\ Yin, An efficient wallpaper daemon for Wayland Compositors, controlled at runtime
         \\ --img:                             Pass an image or animated gif for the daemon to display
         \\ --color:                           Pass a hexcode to clear onto the display
         \\ --restore                          Restore the previous set wallpaper
@@ -84,7 +85,6 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream) !void {
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
     var cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin", safe_name });
     defer allocator.free(cache_file_path);
-
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
         //any error here likely means it could not open the file, cache then
         cache_file_path = try cache_image(path);
@@ -130,12 +130,9 @@ fn send_toggle_play(play: bool, stream: *const std.net.Stream) !void {
 }
 
 fn cache_image(path: []const u8) ![]u8 {
-    std.log.info("Caching image", .{});
-    var image = try zigimg.Image.fromFilePath(allocator, path);
-    defer image.deinit();
+    //create paths
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
     const cache_dir = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin" });
-    defer allocator.free(cache_dir);
     //try create cache dir
     std.fs.makeDirAbsolute(cache_dir) catch |err| {
         switch (err) {
@@ -148,10 +145,16 @@ fn cache_image(path: []const u8) ![]u8 {
     const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
 
-    if (image.isAnimation()) {
-        try cache_animated_image(&image, &pixel_cache_file);
+    //very crude , but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
+    if (std.mem.endsWith(u8, path, ".gif")) {
+        try cache_animated_image(path, &pixel_cache_file);
         return pixel_cache_file_path;
     }
+    std.log.info("Caching image", .{});
+    var image = try zigimg.Image.fromFilePath(allocator, path);
+    defer image.deinit();
+    defer allocator.free(cache_dir);
+
     defer pixel_cache_file.close();
     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
     const pixel_data = try to_argb(image.pixels.rgba32);
@@ -177,7 +180,6 @@ fn cache_image(path: []const u8) ![]u8 {
     try pixel_cache_file.writer().writeInt(u32, @intCast(compressed_size), .little);
     //write height
     try pixel_cache_file.writer().writeInt(u32, @intCast(image.height), .little);
-    std.debug.print("stride is {d}", .{image.pixelFormat().pixelStride()});
     //write width
     try pixel_cache_file.writer().writeInt(u32, @intCast(image.width), .little);
     //write stride
@@ -188,53 +190,12 @@ fn cache_image(path: []const u8) ![]u8 {
     return pixel_cache_file_path;
 }
 
-fn cache_animated_image(image: *zigimg.Image, file: *const std.fs.File) !void {
+fn cache_animated_image(path: []const u8, file: *const std.fs.File) !void {
     //write animated since it is  animated
     const animated = "animated";
     try file.writer().writeInt(u8, animated.len, .little);
     try file.writer().writeAll(animated);
-    const frames = image.animation.frames.items;
-    //write number of frames
-    try file.writer().writeInt(u32, @intCast(frames.len), .little);
-    //write height
-    try file.writer().writeInt(u32, @intCast(image.height), .little);
-    //write width
-    try file.writer().writeInt(u32, @intCast(image.width), .little);
-    //write stride
-    try file.writer().writeInt(u8, image.pixelFormat().pixelStride(), .little);
-    for (frames) |frame| {
-        //write duration
-        const float_as_bytes = std.mem.asBytes(&frame.duration);
-        try file.writer().writeInt(u32, float_as_bytes.len, .little);
-        try file.writer().writeAll(std.mem.asBytes(&frame.duration));
-        std.debug.print("duration {d}", .{frame.duration});
-        const _p = frame.pixels;
-        var rgba32_pixels: zigimg.color.PixelStorage = undefined;
-        if (frame.pixels != .rgba32) {
-            rgba32_pixels = try zigimg.PixelFormatConverter.convert(allocator, &_p, .rgba32);
-        } else {
-            rgba32_pixels = frame.pixels;
-        }
-        const pixel_data = try to_argb(rgba32_pixels.rgba32);
-        const len = pixel_data.items.len;
-        //write original length of pixel data
-        try file.writer().writeInt(u32, @intCast(len), .little);
-        //compress this frame, i should really stop repeating this code
-        const pixel_bytes = std.mem.sliceAsBytes(pixel_data.items);
-        const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
-        const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
-        const compressed_size = lz4.LZ4_compress_default(
-            @ptrCast(@alignCast(pixel_bytes.ptr)),
-            @ptrCast(@alignCast(compressed_buffer.ptr)),
-            @intCast(pixel_bytes.len),
-            @intCast(max_compressed_size),
-        );
-        defer allocator.free(compressed_buffer);
-        //write compressed length
-        try file.writer().writeInt(u32, @intCast(compressed_size), .little);
-        //write data
-        try file.writer().writeAll(compressed_buffer[0..@intCast(compressed_size)]);
-    }
+    try libgif.load_gif(path, file);
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
     var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);

@@ -73,6 +73,7 @@ pub fn load_image(path: []const u8) !?ImageResponse {
 
 pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
     const number_of_frames = try file.reader().readInt(u32, .little);
+    std.log.debug("NUMBER OF FRAMES IS {d}", .{number_of_frames});
     const height = try file.reader().readInt(u32, .little);
     const width = try file.reader().readInt(u32, .little);
     const stride = try file.reader().readInt(u8, .little);

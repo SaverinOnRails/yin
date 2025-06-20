@@ -240,7 +240,6 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     try output.render_static_image(src.?);
     current_frame.deinit();
     //increment the frame
-    std.log.debug("current frame is {d}", .{animated_image.current_frame});
     if (animated_image.current_frame + 1 >= animated_image.frames.len) {
         animated_image.current_frame = 1;
     } else {
