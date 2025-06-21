@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const gif = @import("gif");
+const magick = @import("magick");
 const lz4 = @import("shared").lz4;
 const GIF_ERROR = gif.GIF_ERROR;
 pub const allocator = std.heap.c_allocator;
@@ -146,11 +147,12 @@ pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.
                     r << 16 |
                     g << 8 |
                     b;
-
                 composite_buffer.?[canvas_index] = argb;
             }
         }
     }
+    try magick_dither(composite_buffer.?, canvas_height, canvas_width);
+
     //composite buffer now contains the frame data
     //write duration
     var duration: f32 = @as(f32, @floatFromInt(gcb.DelayTime)) * 0.01;
@@ -213,4 +215,45 @@ fn number_of_frames(path: []const u8) usize {
         }
     }
     return framecount;
+}
+
+fn magick_dither(buffer: []u32, height: usize, width: usize) !void {
+    magick.MagickWandGenesis();
+    const wand = magick.NewMagickWand();
+    const rgba_buffer = try allocator.alloc(u8, width * height * 4);
+    defer allocator.free(rgba_buffer);
+    for (0..width * height) |i| {
+        const argb: u32 = buffer[i];
+        const a = (argb >> 24) & 0xFF;
+        const r = (argb >> 16) & 0xFF;
+        const g = (argb >> 8) & 0xFF;
+        const b = (argb) & 0xFF;
+        rgba_buffer[i * 4 + 0] = @truncate(@as(u8, @intCast(r)));
+        rgba_buffer[i * 4 + 1] = @truncate(@as(u8, @intCast(g)));
+        rgba_buffer[i * 4 + 2] = @truncate(@as(u8, @intCast(b)));
+        rgba_buffer[i * 4 + 3] = @truncate(@as(u8, @intCast(a)));
+    }
+    const status = magick.MagickConstituteImage(
+        wand,
+        @intCast(width),
+        @intCast(height),
+        "RGBA",
+        magick.CharPixel,
+        @ptrCast(@alignCast(rgba_buffer.ptr)),
+    );
+    std.debug.assert(status != magick.MagickFalse);
+
+    _ = magick.MagickSetImageType(wand, magick.TrueColorType); // Ensure full-color base
+    _ = magick.MagickSetImageDepth(wand, 8); // 8-bit per channel
+
+    _ = magick.MagickGaussianBlurImage(wand, 1.2, 0.6);
+    _ = magick.MagickExportImagePixels(wand, 0, 0, @intCast(width), @intCast(height), "RGBA", magick.CharPixel, @ptrCast(@alignCast(rgba_buffer.ptr)));
+
+    for (0..width * height) |i| {
+        const r: u32 = @intCast(rgba_buffer[i * 4 + 0]);
+        const g: u32 = @intCast(rgba_buffer[i * 4 + 1]);
+        const b: u32 = @intCast(rgba_buffer[i * 4 + 2]);
+        const a: u32 = @intCast(rgba_buffer[i * 4 + 3]);
+        composite_buffer.?[i] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
 }

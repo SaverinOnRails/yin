@@ -63,7 +63,13 @@ pub const AnimatedImage = struct {
         var pixel_data = std.ArrayList(u32).init(allocator);
         _ = try pixel_data.resize(decompressed_data.len);
         @memcpy(pixel_data.items, decompressed_data);
-        const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(self.width), @intCast(self.height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(self.stride * self.width));
+        const src_img = pixman.Image.createBits(
+            .a8r8g8b8,
+            @intCast(self.width),
+            @intCast(self.height),
+            @ptrCast(@alignCast(pixel_data.items.ptr)),
+            @intCast(self.stride * self.width),
+        );
         const src = try allocator.create(Image);
         src.* = .{ .pixel_data = pixel_data, .src = src_img.? };
         const animatedframe = try allocator.create(AnimationFrame);
