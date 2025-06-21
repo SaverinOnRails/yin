@@ -1,5 +1,7 @@
 const std = @import("std");
+const Buffer = @import("Buffer.zig");
 const pixman = @import("pixman");
+const wl = @import("wayland").client.wl;
 const lz4 = @import("shared").lz4;
 const Output = @import("output.zig").Output;
 const zigimg = @import("zigimg");
@@ -18,7 +20,7 @@ const ImageResponse = union(enum) {
     },
 };
 //load pixels from cache, very fast
-pub fn load_image(path: []const u8) !?ImageResponse {
+pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     const _file = try std.fs.openFileAbsolute(path, .{});
     var file = try allocator.create(std.fs.File);
     file.* = _file;
@@ -29,11 +31,12 @@ pub fn load_image(path: []const u8) !?ImageResponse {
     const _br = try file.reader().readAll(_buffer);
 
     if (std.mem.order(u8, _buffer[0.._br], "animated") == .eq) {
-        return load_animated_image(file);
+        return load_animated_image(file, output);
     } else if (std.mem.order(u8, _buffer[0.._br], "static") != .eq) {
         //unknown, possibly corrupted.
         return null;
     }
+    defer allocator.destroy(file);
     defer file.close();
     //read original
     const original_len = try file.reader().readInt(u32, .little);
@@ -71,7 +74,11 @@ pub fn load_image(path: []const u8) !?ImageResponse {
     return ImageResponse{ .Static = .{ .image = src } };
 }
 
-pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
+pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse {
+    defer {
+        file.close();
+        allocator.destroy(file);
+    }
     const number_of_frames = try file.reader().readInt(u32, .little);
     std.log.debug("NUMBER OF FRAMES IS {d}", .{number_of_frames});
     const height = try file.reader().readInt(u32, .little);
@@ -80,30 +87,73 @@ pub fn load_animated_image(file: *std.fs.File) !?ImageResponse {
     //Go through frames
     var animation_frames = try allocator.alloc(u64, number_of_frames);
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
+    var poolbuffers = std.ArrayList(Buffer.PoolBuffer).init(allocator);
     for (0..number_of_frames) |i| {
         animation_frames[i] = try file.getPos();
         const duration_length = try file.reader().readInt(u32, .little);
-        // try file.seekBy(duration_length);
         const duration_buffer = try allocator.alloc(u8, duration_length);
         defer allocator.free(duration_buffer);
         _ = try file.readAll(duration_buffer);
-        const duration = std.mem.bytesToValue(f32, duration_buffer);
+        const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
         durations[i] = duration;
-        _ = try file.reader().readInt(u32, .little);
-        const compressed_len = try file.reader().readInt(u32, .little);
-        const bytes_to_read = compressed_len;
-        try file.seekBy(bytes_to_read);
+        const original_pixel_len = try file.reader().readInt(u32, .little);
+        const compressed_pixel_len = try file.reader().readInt(u32, .little);
+        const compressed_buffer = try allocator.alloc(u8, compressed_pixel_len);
+        defer allocator.free(compressed_buffer);
+        _ = try file.reader().readAll(compressed_buffer);
+        const decompressed_buffer = try allocator.alloc(u8, original_pixel_len * @sizeOf(u32));
+        defer allocator.free(decompressed_buffer);
+        const decompressed_size = lz4.LZ4_decompress_safe(
+            @ptrCast(@alignCast(compressed_buffer.ptr)),
+            @ptrCast(@alignCast(decompressed_buffer.ptr)),
+            @intCast(compressed_buffer.len),
+            @intCast(decompressed_buffer.len),
+        );
+        const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
+        const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
+
+        var pixel_data = std.ArrayList(u32).init(allocator);
+        _ = try pixel_data.resize(decompressed_data.len);
+        @memcpy(pixel_data.items, decompressed_data);
+        defer pixel_data.deinit();
+        const src_img = pixman.Image.createBits(
+            .a8r8g8b8,
+            @intCast(width),
+            @intCast(height),
+            @ptrCast(@alignCast(pixel_data.items.ptr)),
+            @intCast(stride * width),
+        );
+        var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
+        const poolbuffer = try Buffer.new_buffer(output) orelse return error.NoBuffer;
+        //place image on buffer,
+        src.Scale(
+            output.width * @as(u32, @intCast(output.scale)),
+            output.height * @as(u32, @intCast(output.scale)),
+            1,
+        );
+        pixman.Image.composite32(
+            .src,
+            src.src,
+            null,
+            poolbuffer.pixman_image,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            @intCast(output.width * @as(u32, @intCast(output.scale))),
+            @intCast(output.height * @as(u32, @intCast(output.scale))),
+        );
+        try poolbuffers.append(poolbuffer.*);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
     try file.seekTo(0);
     return ImageResponse{ .Animated = .{ .image = .{
-        .frames = animation_frames,
-        .file = file,
         .durations = durations,
+        .frames = animation_frames,
         .timer_fd = timer_fd,
-        .height = height,
-        .width = width,
-        .stride = stride,
+        .framebuffers = poolbuffers,
     } } };
 }
 pub fn deinit(image: *Image) void {

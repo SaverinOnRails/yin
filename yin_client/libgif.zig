@@ -151,7 +151,7 @@ pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.
             }
         }
     }
-    try magick_dither(composite_buffer.?, canvas_height, canvas_width);
+    // try magick_deband(composite_buffer.?, canvas_height, canvas_width);
 
     //composite buffer now contains the frame data
     //write duration
@@ -217,11 +217,13 @@ fn number_of_frames(path: []const u8) usize {
     return framecount;
 }
 
-fn magick_dither(buffer: []u32, height: usize, width: usize) !void {
+//depand gifs, if we plan to support mp4s later , do we really need this?
+fn magick_deband(buffer: []u32, height: usize, width: usize) !void {
     magick.MagickWandGenesis();
     const wand = magick.NewMagickWand();
     const rgba_buffer = try allocator.alloc(u8, width * height * 4);
     defer allocator.free(rgba_buffer);
+    //TODO: RGBA TO ARGB TO RGBA TO ARGB again is fucking retarded.
     for (0..width * height) |i| {
         const argb: u32 = buffer[i];
         const a = (argb >> 24) & 0xFF;

@@ -12,7 +12,7 @@ const allocator = @import("util.zig").allocator;
 wlOutput: *wl.Output,
 wlSurface: ?*wl.Surface = null,
 wayland_name: u32 = 0,
-buffer_ring: std.SinglyLinkedList(PoolBuffer) = .{},
+buffer_ring: std.SinglyLinkedList(PoolBuffer) = .{}, //this is honestly pointless
 scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
@@ -150,7 +150,7 @@ fn restore_wallpaper(output: *Output) !void {
 }
 
 fn render_image(output: *Output, path: []u8) !void {
-    const src_img = try image.load_image(path) orelse return error.CouldNotLoadImage;
+    const src_img = try image.load_image(path, output) orelse return error.CouldNotLoadImage;
     switch (src_img) {
         .Static => |s| {
             try output.render_static_image(s.image);
@@ -235,11 +235,11 @@ pub fn deinit(output: *Output) void {
 }
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-    const current_frame = try animated_image.get_frame(animated_image.current_frame);
-    const src = current_frame.image;
-    try output.render_static_image(src.?);
-    current_frame.deinit();
-    //increment the frame
+    const poolbuffer = animated_image.framebuffers.items[animated_image.current_frame];
+    const surface = output.wlSurface orelse return;
+    surface.attach(poolbuffer.wlBuffer, 0, 0);
+    surface.damage(0, 0, @intCast(output.width), @intCast(output.height));
+    surface.commit();
     if (animated_image.current_frame + 1 >= animated_image.frames.len) {
         animated_image.current_frame = 1;
     } else {
