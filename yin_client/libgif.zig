@@ -3,6 +3,7 @@
 // zigimg is slow and afaik does not support sequential loading meaning the entire potentially large gif will need to be loaded into memory
 
 const std = @import("std");
+const shrink = @import("downsize.zig");
 const gif = @import("gif");
 const magick = @import("magick");
 const lz4 = @import("shared").lz4;
@@ -20,7 +21,7 @@ pub fn initCompositeBuffer(width: usize, height: usize) !void {
     @memset(composite_buffer.?, 0x00000000); //check if background color will work here
 }
 
-pub fn load_gif(path: []const u8, file_handle: *const std.fs.File) !void {
+pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: bool) !void {
     var error_code: c_int = undefined;
     const file = gif.DGifOpenFileName(@ptrCast(path), &error_code) orelse return error.CouldNotLoadGif;
     const framecount = number_of_frames(path);
@@ -29,12 +30,23 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File) !void {
     var ExtFunction: c_int = undefined;
     var ExtData: [*c]gif.GifByteType = undefined;
     var gcb: gif.GraphicsControlBlock = undefined;
+
+    var height: u32 = @intCast(canvas_height);
+    var width: u32 = @intCast(canvas_width);
+    std.log.debug("Caching GIF. Resolution : {d}x{d}", .{ width, height });
+    if (downsize) {
+        if (height > 1080 or width > 1920) {
+            std.log.info("Downsizing to full HD", .{});
+            height = 1080;
+            width = 1920;
+        }
+    }
     //write number of frames
     try file_handle.writer().writeInt(u32, @intCast(framecount), .little);
     //write height
-    try file_handle.writer().writeInt(u32, @intCast(canvas_height), .little);
+    try file_handle.writer().writeInt(u32, height, .little);
     //write width
-    try file_handle.writer().writeInt(u32, @intCast(canvas_width), .little);
+    try file_handle.writer().writeInt(u32, width, .little);
     //write stride
     try file_handle.writer().writeInt(u8, 4, .little); //just realised this isnt actually stride smh
 
@@ -95,7 +107,13 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File) !void {
                     file.*.ExtensionBlocks = null;
                     file.*.ExtensionBlockCount = 0;
                 }
-                try iter(file, IMAGE, gcb, file_handle);
+                try iter(
+                    file,
+                    IMAGE,
+                    gcb,
+                    file_handle,
+                    downsize,
+                );
                 const image_count: i32 = @intCast(file.*.ImageCount);
                 const frame_count_f32: f32 = @floatFromInt(framecount);
                 const image_count_f32: f32 = @floatFromInt(image_count);
@@ -120,7 +138,7 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File) !void {
     }
 }
 
-pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.GraphicsControlBlock, file_handle: *const std.fs.File) !void {
+pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.GraphicsControlBlock, file_handle: *const std.fs.File, downsize: bool) !void {
     const colorMap = savedImage.*.ImageDesc.ColorMap orelse file.*.SColorMap;
     const frame_width: usize = @intCast(savedImage.*.ImageDesc.Width);
     const frame_height: usize = @intCast(savedImage.*.ImageDesc.Height);
@@ -159,7 +177,22 @@ pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.
     const float_as_bytes = std.mem.asBytes(&duration);
     try file_handle.writer().writeInt(u32, float_as_bytes.len, .little);
     try file_handle.writer().writeAll(std.mem.asBytes(&duration));
-    const pixel_data = composite_buffer.?;
+    const _pixel_data = composite_buffer.?;
+    const pixel_data = if (downsize and (canvas_width > 1920 or canvas_height > 1080)) blk: {
+        const resized_data = try shrink.downsampleBilinear(
+            _pixel_data,
+            @intCast(canvas_width),
+            @intCast(canvas_height),
+            1920,
+            1080,
+            allocator,
+        );
+        break :blk resized_data;
+    } else _pixel_data;
+
+    defer if (downsize and (canvas_width > 1920 or canvas_height > 1080)) {
+        allocator.free(pixel_data);
+    };
     const len = pixel_data.len;
     //write original length of pixel data
     try file_handle.writer().writeInt(u32, @intCast(len), .little);
