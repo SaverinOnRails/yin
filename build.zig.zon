@@ -40,10 +40,6 @@
             .url = "https://codeberg.org/ifreund/zig-wayland/archive/v0.3.0.tar.gz",
             .hash = "wayland-0.3.0-lQa1kjPIAQDmhGYpY-zxiRzQJFHQ2VqhJkQLbKKdt5wl",
         },
-        .zigcairo = .{
-            .url = "git+https://www.github.com/eugenenoble2005/zig-cairo.git#9eaa6cb50e2b61e4d14d18cd4209a8e2d22682df",
-            .hash = "zigcairo-0.0.1-AAAAAO4oAAAmQxPvHDpGdR81nSKUEe4TpppJgwbD0WJO",
-        },
         .zigimg = .{
             .url = "https://github.com/zigimg/zigimg/archive/refs/tags/zigimg_zig_0.14.1.tar.gz",
             .hash = "zigimg-0.1.0-8_eo2h6XEgAR6UkBiCtWECcml0gtx0oIXE3MX7sPCZof",

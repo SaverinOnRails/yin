@@ -1,6 +1,7 @@
 const std = @import("std");
 const flags = @import("flags");
 const libgif = @import("libgif.zig");
+const videoloader = @import("videoloader.zig");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
 const shared = @import("shared");
@@ -144,21 +145,19 @@ fn cache_image(path: []const u8) ![]u8 {
     defer allocator.free(safe_file_name);
     const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
-
-    //very crude , but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
-    if (std.mem.endsWith(u8, path, ".gif")) {
-        try cache_animated_image(path, &pixel_cache_file);
+    //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
+    if (std.mem.endsWith(u8, path, ".gif") or std.mem.endsWith(u8, path, ".mp4")) {
+        try cache_animated_gif(path, &pixel_cache_file);
         return pixel_cache_file_path;
     }
-    std.log.info("Caching image", .{});
     var image = try zigimg.Image.fromFilePath(allocator, path);
+    std.log.info("Caching image. Resolution : {d}x{d}", .{ image.width, image.width });
+
     defer image.deinit();
     defer allocator.free(cache_dir);
-
     defer pixel_cache_file.close();
     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
     const pixel_data = try to_argb(image.pixels.rgba32);
-
     //write static since it is not animated
     const static = "static";
     try pixel_cache_file.writer().writeInt(u8, static.len, .little);
@@ -190,12 +189,16 @@ fn cache_image(path: []const u8) ![]u8 {
     return pixel_cache_file_path;
 }
 
-fn cache_animated_image(path: []const u8, file: *const std.fs.File) !void {
+fn cache_animated_gif(path: []const u8, file: *const std.fs.File) !void {
     //write animated since it is  animated
     const animated = "animated";
     try file.writer().writeInt(u8, animated.len, .little);
     try file.writer().writeAll(animated);
-    try libgif.load_gif(path, file);
+    if (std.mem.endsWith(u8, path, ".gif")) {
+        try libgif.load_gif(path, file);
+    } else {
+        try videoloader.load_video(path, file);
+    }
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
     var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);

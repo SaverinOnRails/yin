@@ -69,13 +69,23 @@ pub fn build(b: *std.Build) void {
         .target = target,
     });
 
+    const ffmpeg = b.addTranslateC(.{
+        .root_source_file = b.path("vendor/ffmpeg.h"),
+        .target = target,
+        .optimize = optimize,
+    });
     shared.addImport("lz4", lz4.createModule());
     yin_client.root_module.addImport("gif", gif.createModule());
+    yin_client.root_module.addImport("ffmpeg", ffmpeg.createModule());
     yin_client.linkSystemLibrary("lz4");
     yin_daemon.linkSystemLibrary("lz4");
     magick.addIncludePath(.{ .cwd_relative = "/usr/include/ImageMagick-7" });
     yin_client.root_module.addImport("magick", magick.createModule());
-    yin_client.linkSystemLibrary("MagickWand-7.Q16HDRI"); 
+    yin_client.linkSystemLibrary("MagickWand-7.Q16HDRI");
+    yin_client.linkSystemLibrary("libswscale");
+    yin_client.linkSystemLibrary("avformat");
+    yin_client.linkSystemLibrary("avcodec");
+    yin_client.linkSystemLibrary("avutil");
     b.installArtifact(yin_daemon);
     b.installArtifact(yin_client);
 }

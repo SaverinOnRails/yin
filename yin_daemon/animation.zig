@@ -9,7 +9,7 @@ const Buffer = @import("Buffer.zig");
 const Image = @import("image.zig").Image;
 //use global allocator
 pub const AnimatedImage = struct {
-    frames: []u64,
+    framecount: usize,
     durations: []f32,
     framebuffers: std.ArrayList(Buffer.PoolBuffer),
     current_frame: u32 = 1,
@@ -17,8 +17,11 @@ pub const AnimatedImage = struct {
     event_index: usize = 1,
     output_name: u32 = 0,
     pub fn deinit(self: *AnimatedImage) void {
-        allocator.free(self.frames);
         allocator.free(self.durations);
+        for (self.framebuffers.items) |buffer| {
+            _ = buffer.pixman_image.unref();
+            buffer.wlBuffer.destroy();
+        }
         self.framebuffers.deinit();
         // allocator.destroy(self); //check why this fails
     }
@@ -32,7 +35,6 @@ pub const AnimatedImage = struct {
         };
         try posix.timerfd_settime(timer_fd, .{}, &spec, null);
     }
-
 };
 pub const AnimationFrame = struct {
     image: ?*Image = null, //this will get released after a render, so we cannot release it here to prevent double free

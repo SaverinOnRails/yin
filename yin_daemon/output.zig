@@ -240,7 +240,7 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     surface.attach(poolbuffer.wlBuffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.height));
     surface.commit();
-    if (animated_image.current_frame + 1 >= animated_image.frames.len) {
+    if (animated_image.current_frame + 1 >= animated_image.framecount) {
         animated_image.current_frame = 1;
     } else {
         animated_image.current_frame += 1;

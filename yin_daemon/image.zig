@@ -19,7 +19,6 @@ const ImageResponse = union(enum) {
         image: animation.AnimatedImage,
     },
 };
-//load pixels from cache, very fast
 pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     const _file = try std.fs.openFileAbsolute(path, .{});
     var file = try allocator.create(std.fs.File);
@@ -75,32 +74,44 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
 }
 
 pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse {
+    //file is likely big af so use memory mapping here
+    const current_pos = try file.getPos();
+    const file_size = try file.getEndPos();
+    const file_mapped_memory = try std.posix.mmap(
+        null,
+        file_size,
+        std.posix.PROT.READ,
+        .{ .TYPE = .SHARED },
+        file.handle,
+        0,
+    );
+    defer std.posix.munmap(file_mapped_memory);
+    const actual_data = file_mapped_memory[current_pos..];
+    var fbs = std.io.fixedBufferStream(actual_data);
     defer {
         file.close();
         allocator.destroy(file);
     }
-    const number_of_frames = try file.reader().readInt(u32, .little);
+    const number_of_frames = try fbs.reader().readInt(u32, .little);
     std.log.debug("NUMBER OF FRAMES IS {d}", .{number_of_frames});
-    const height = try file.reader().readInt(u32, .little);
-    const width = try file.reader().readInt(u32, .little);
-    const stride = try file.reader().readInt(u8, .little);
+    const height = try fbs.reader().readInt(u32, .little);
+    const width = try fbs.reader().readInt(u32, .little);
+    const stride = try fbs.reader().readInt(u8, .little);
     //Go through frames
-    var animation_frames = try allocator.alloc(u64, number_of_frames);
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
     var poolbuffers = std.ArrayList(Buffer.PoolBuffer).init(allocator);
     for (0..number_of_frames) |i| {
-        animation_frames[i] = try file.getPos();
-        const duration_length = try file.reader().readInt(u32, .little);
+        const duration_length = try fbs.reader().readInt(u32, .little);
         const duration_buffer = try allocator.alloc(u8, duration_length);
         defer allocator.free(duration_buffer);
-        _ = try file.readAll(duration_buffer);
+        _ = try fbs.reader().readAll(duration_buffer);
         const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
         durations[i] = duration;
-        const original_pixel_len = try file.reader().readInt(u32, .little);
-        const compressed_pixel_len = try file.reader().readInt(u32, .little);
+        const original_pixel_len = try fbs.reader().readInt(u32, .little);
+        const compressed_pixel_len = try fbs.reader().readInt(u32, .little);
         const compressed_buffer = try allocator.alloc(u8, compressed_pixel_len);
         defer allocator.free(compressed_buffer);
-        _ = try file.reader().readAll(compressed_buffer);
+        _ = try fbs.reader().readAll(compressed_buffer);
         const decompressed_buffer = try allocator.alloc(u8, original_pixel_len * @sizeOf(u32));
         defer allocator.free(decompressed_buffer);
         const decompressed_size = lz4.LZ4_decompress_safe(
@@ -112,19 +123,19 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
         const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
 
+        //only because image struct needs this
         var pixel_data = std.ArrayList(u32).init(allocator);
-        _ = try pixel_data.resize(decompressed_data.len);
-        @memcpy(pixel_data.items, decompressed_data);
         defer pixel_data.deinit();
         const src_img = pixman.Image.createBits(
             .a8r8g8b8,
             @intCast(width),
             @intCast(height),
-            @ptrCast(@alignCast(pixel_data.items.ptr)),
+            @ptrCast(@alignCast(decompressed_data.ptr)),
             @intCast(stride * width),
         );
         var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
         const poolbuffer = try Buffer.new_buffer(output) orelse return error.NoBuffer;
+        defer allocator.destroy(poolbuffer);
         //place image on buffer,
         src.Scale(
             output.width * @as(u32, @intCast(output.scale)),
@@ -146,16 +157,17 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(output.height * @as(u32, @intCast(output.scale))),
         );
         try poolbuffers.append(poolbuffer.*);
+        std.log.debug("Appended buffer \r\n", .{});
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
-    try file.seekTo(0);
     return ImageResponse{ .Animated = .{ .image = .{
         .durations = durations,
-        .frames = animation_frames,
+        .framecount = number_of_frames,
         .timer_fd = timer_fd,
         .framebuffers = poolbuffers,
     } } };
 }
+
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
     _ = image.src.unref();
