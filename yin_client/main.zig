@@ -231,7 +231,7 @@ fn cache_animated_gif(path: []const u8, file: *const std.fs.File, downsize: bool
     if (std.mem.endsWith(u8, path, ".gif")) {
         try libgif.load_gif(path, file, downsize);
     } else {
-        try videoloader.load_video(path, file);
+        try videoloader.load_video(path, file, downsize);
     }
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
