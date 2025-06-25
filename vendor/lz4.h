@@ -42,7 +42,6 @@ extern "C" {
 /* --- Dependency --- */
 #include <stddef.h>   /* size_t */
 
-
 /**
   Introduction
 
@@ -224,6 +223,8 @@ LZ4LIB_API int LZ4_decompress_safe (const char* src, char* dst, int compressedSi
               or 0, if input size is incorrect (too large or negative)
 */
 LZ4LIB_API int LZ4_compressBound(int inputSize);
+
+LZ4LIB_API int LZ4_compress_HC (const char* src, char* dst, int srcSize, int dstCapacity, int compressionLevel);
 
 /*! LZ4_compress_fast() :
     Same as LZ4_compress_default(), but allows selection of "acceleration" factor.

@@ -118,7 +118,7 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: boo
                 const frame_count_f32: f32 = @floatFromInt(framecount);
                 const image_count_f32: f32 = @floatFromInt(image_count);
                 const percentage: f32 = (image_count_f32 / frame_count_f32) * 100.0;
-                std.log.info("Caching gif : {d}%/100%...", .{@round(percentage * 100) / 100});
+                try std.io.getStdOut().writer().print("\rCaching gif : {d}%/100%...", .{@round(percentage * 100) / 100});
             },
 
             gif.EXTENSION_RECORD_TYPE => {
@@ -248,47 +248,4 @@ fn number_of_frames(path: []const u8) usize {
         }
     }
     return framecount;
-}
-
-//depand gifs, if we plan to support mp4s later , do we really need this?
-fn magick_deband(buffer: []u32, height: usize, width: usize) !void {
-    magick.MagickWandGenesis();
-    const wand = magick.NewMagickWand();
-    const rgba_buffer = try allocator.alloc(u8, width * height * 4);
-    defer allocator.free(rgba_buffer);
-    //TODO: RGBA TO ARGB TO RGBA TO ARGB again is fucking retarded.
-    for (0..width * height) |i| {
-        const argb: u32 = buffer[i];
-        const a = (argb >> 24) & 0xFF;
-        const r = (argb >> 16) & 0xFF;
-        const g = (argb >> 8) & 0xFF;
-        const b = (argb) & 0xFF;
-        rgba_buffer[i * 4 + 0] = @truncate(@as(u8, @intCast(r)));
-        rgba_buffer[i * 4 + 1] = @truncate(@as(u8, @intCast(g)));
-        rgba_buffer[i * 4 + 2] = @truncate(@as(u8, @intCast(b)));
-        rgba_buffer[i * 4 + 3] = @truncate(@as(u8, @intCast(a)));
-    }
-    const status = magick.MagickConstituteImage(
-        wand,
-        @intCast(width),
-        @intCast(height),
-        "RGBA",
-        magick.CharPixel,
-        @ptrCast(@alignCast(rgba_buffer.ptr)),
-    );
-    std.debug.assert(status != magick.MagickFalse);
-
-    _ = magick.MagickSetImageType(wand, magick.TrueColorType); // Ensure full-color base
-    _ = magick.MagickSetImageDepth(wand, 8); // 8-bit per channel
-
-    _ = magick.MagickGaussianBlurImage(wand, 1.2, 0.6);
-    _ = magick.MagickExportImagePixels(wand, 0, 0, @intCast(width), @intCast(height), "RGBA", magick.CharPixel, @ptrCast(@alignCast(rgba_buffer.ptr)));
-
-    for (0..width * height) |i| {
-        const r: u32 = @intCast(rgba_buffer[i * 4 + 0]);
-        const g: u32 = @intCast(rgba_buffer[i * 4 + 1]);
-        const b: u32 = @intCast(rgba_buffer[i * 4 + 2]);
-        const a: u32 = @intCast(rgba_buffer[i * 4 + 3]);
-        composite_buffer.?[i] = (a << 24) | (r << 16) | (g << 8) | b;
-    }
 }
