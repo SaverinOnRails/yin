@@ -12,6 +12,7 @@ height: u32,
 width: u32,
 busy: bool,
 used: bool = false,
+memory_map: []align(4096) u8 = undefined,
 data: [*]u32,
 pixman_image: *pixman.Image,
 const MAX_BUFFERS = 4;
@@ -73,6 +74,7 @@ pub fn new_buffer(output: *Output) !?*PoolBuffer {
         .height = height,
         .width = width,
         .busy = false,
+        .memory_map = data,
         .data = data_slice,
         .pixman_image = pixman_image.?,
     };

@@ -156,7 +156,9 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(output.width * @as(u32, @intCast(output.scale))),
             @intCast(output.height * @as(u32, @intCast(output.scale))),
         );
+        std.posix.munmap(poolbuffer.memory_map);
         try poolbuffers.append(poolbuffer.*);
+        if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
         std.log.debug("Appended buffer \r\n", .{});
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
