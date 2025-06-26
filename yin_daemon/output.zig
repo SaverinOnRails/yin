@@ -235,9 +235,20 @@ pub fn deinit(output: *Output) void {
 }
 
 pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-    const poolbuffer = animated_image.framebuffers.items[animated_image.current_frame];
+    const scale: u32 = @intCast(output.scale);
+    const height = output.height * scale;
+    const width = output.width * scale;
+    const stride = width * 4;
+    const fd = animated_image.frame_fds[animated_image.current_frame];
+    const size = height * stride;
+    const shmPool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
+    defer shmPool.destroy();
+    const wlBuffer = try shmPool.createBuffer(0, @intCast(width), @intCast(height), @intCast(stride), .argb8888);
+    defer wlBuffer.destroy();
+    // const poolbuffer = animated_image.framebuffers.items[animated_image.current_frame];
     const surface = output.wlSurface orelse return;
-    surface.attach(poolbuffer.wlBuffer, 0, 0);
+    // _ = poolbuffer;
+    surface.attach(wlBuffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.height));
     surface.commit();
     if (animated_image.current_frame + 1 >= animated_image.framecount) {

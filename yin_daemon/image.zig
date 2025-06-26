@@ -74,7 +74,11 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
 }
 
 pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse {
-    //file is likely big af so use memory mapping here
+    const output_scale: u32 = @intCast(output.scale);
+    const output_height = output.height * output_scale;
+    const output_width = output.width * output_scale;
+    const output_stride = output_width * 4;
+
     const current_pos = try file.getPos();
     const file_size = try file.getEndPos();
     const file_mapped_memory = try std.posix.mmap(
@@ -100,6 +104,8 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
     //Go through frames
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
     var poolbuffers = std.ArrayList(Buffer.PoolBuffer).init(allocator);
+    var frame_fds = try allocator.alloc(std.posix.fd_t, number_of_frames);
+    _ = &poolbuffers;
     for (0..number_of_frames) |i| {
         const duration_length = try fbs.reader().readInt(u32, .little);
         const duration_buffer = try allocator.alloc(u8, duration_length);
@@ -134,9 +140,26 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(stride * width),
         );
         var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
-        const poolbuffer = try Buffer.new_buffer(output) orelse return error.NoBuffer;
-        defer allocator.destroy(poolbuffer);
-        //place image on buffer,
+        const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
+        //defer std.posix.close(fd);
+        const size = output_width * output_stride;
+        try std.posix.ftruncate(fd, @intCast(size));
+        const data = try std.posix.mmap(
+            null,
+            size,
+            std.posix.PROT.READ | std.posix.PROT.WRITE,
+            .{ .TYPE = .SHARED },
+            fd,
+            0,
+        );
+        defer std.posix.munmap(data);
+        const target_pixman = pixman.Image.createBits(
+            .a8r8g8b8,
+            @intCast(output_width),
+            @intCast(output_height),
+            @ptrCast(@alignCast(data.ptr)),
+            @intCast(output_stride),
+        );
         src.Scale(
             output.width * @as(u32, @intCast(output.scale)),
             output.height * @as(u32, @intCast(output.scale)),
@@ -144,9 +167,9 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         );
         pixman.Image.composite32(
             .src,
-            src.src,
+            src_img.?,
             null,
-            poolbuffer.pixman_image,
+            target_pixman.?,
             0,
             0,
             0,
@@ -156,15 +179,17 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(output.width * @as(u32, @intCast(output.scale))),
             @intCast(output.height * @as(u32, @intCast(output.scale))),
         );
-        std.posix.munmap(poolbuffer.memory_map);
-        try poolbuffers.append(poolbuffer.*);
-        if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
+        frame_fds[i] = fd;
+        // std.posix.munmap(poolbuffer.memory_map);
+        // try poolbuffers.append(poolbuffer.*);
+        // if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
         std.log.debug("Appended buffer \r\n", .{});
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
     return ImageResponse{ .Animated = .{ .image = .{
         .durations = durations,
         .framecount = number_of_frames,
+        .frame_fds = frame_fds,
         .timer_fd = timer_fd,
         .framebuffers = poolbuffers,
     } } };

@@ -11,6 +11,7 @@ const Image = @import("image.zig").Image;
 pub const AnimatedImage = struct {
     framecount: usize,
     durations: []f32,
+    frame_fds: []posix.fd_t,
     framebuffers: std.ArrayList(Buffer.PoolBuffer),
     current_frame: u32 = 1,
     timer_fd: posix.fd_t,
