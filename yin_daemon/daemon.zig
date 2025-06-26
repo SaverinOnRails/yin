@@ -20,6 +20,7 @@ const allocator = util.allocator;
 
 //init and run event loop
 pub fn init() !void {
+    if (instanceRunning()) return error.InstanceAlreadyRunning;
     var daemon: Daemon = .{
         .wlDisplay = wl.Display.connect(null) catch die("Could not connect to wayland compositor"),
     };
@@ -182,4 +183,11 @@ fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
             daemon.toggle_play(true);
         },
     }
+}
+
+fn instanceRunning() bool {
+    //check if we can ping the unix socket
+    const stream = std.net.connectUnixSocket("/tmp/yin") catch return false;
+    stream.close();
+    return true;
 }
