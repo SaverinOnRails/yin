@@ -5,7 +5,6 @@
 const std = @import("std");
 const shrink = @import("downsize.zig");
 const gif = @import("gif");
-const magick = @import("magick");
 const lz4 = @import("shared").lz4;
 const GIF_ERROR = gif.GIF_ERROR;
 pub const allocator = std.heap.c_allocator;

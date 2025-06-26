@@ -18,6 +18,9 @@ pub const AnimatedImage = struct {
     output_name: u32 = 0,
     pub fn deinit(self: *AnimatedImage) void {
         allocator.free(self.durations);
+        for(self.frame_fds) |fd| {
+            std.posix.close(fd);
+        }
         allocator.free(self.frame_fds);
         // allocator.destroy(self); //check why this fails
     }

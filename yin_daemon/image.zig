@@ -150,6 +150,7 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             fd,
             0,
         );
+        defer std.posix.munmap(data);
         const target_pixman = pixman.Image.createBits(
             .a8r8g8b8,
             @intCast(output_width),

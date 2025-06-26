@@ -1,5 +1,4 @@
 const std = @import("std");
-const magick = @import("magick");
 const shrink = @import("downsize.zig");
 const flags = @import("flags");
 const libgif = @import("libgif.zig");
