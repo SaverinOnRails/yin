@@ -97,15 +97,12 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         allocator.destroy(file);
     }
     const number_of_frames = try fbs.reader().readInt(u32, .little);
-    std.log.debug("NUMBER OF FRAMES IS {d}", .{number_of_frames});
     const height = try fbs.reader().readInt(u32, .little);
     const width = try fbs.reader().readInt(u32, .little);
     const stride = try fbs.reader().readInt(u8, .little);
     //Go through frames
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
-    var poolbuffers = std.ArrayList(Buffer.PoolBuffer).init(allocator);
     var frame_fds = try allocator.alloc(std.posix.fd_t, number_of_frames);
-    _ = &poolbuffers;
     for (0..number_of_frames) |i| {
         const duration_length = try fbs.reader().readInt(u32, .little);
         const duration_buffer = try allocator.alloc(u8, duration_length);
@@ -140,7 +137,6 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(stride * width),
         );
         var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
-
         //write image directly to shm
         const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
         //defer std.posix.close(fd);
@@ -181,8 +177,6 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(output.height * @as(u32, @intCast(output.scale))),
         );
         frame_fds[i] = fd;
-        if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
-        std.log.debug("Appended buffer \r\n", .{});
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
     return ImageResponse{ .Animated = .{ .image = .{
@@ -190,7 +184,6 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         .framecount = number_of_frames,
         .frame_fds = frame_fds,
         .timer_fd = timer_fd,
-        .framebuffers = poolbuffers,
     } } };
 }
 

@@ -12,18 +12,13 @@ pub const AnimatedImage = struct {
     framecount: usize,
     durations: []f32,
     frame_fds: []posix.fd_t,
-    framebuffers: std.ArrayList(Buffer.PoolBuffer),
     current_frame: u32 = 1,
     timer_fd: posix.fd_t,
     event_index: usize = 1,
     output_name: u32 = 0,
     pub fn deinit(self: *AnimatedImage) void {
         allocator.free(self.durations);
-        for (self.framebuffers.items) |buffer| {
-            _ = buffer.pixman_image.unref();
-            buffer.wlBuffer.destroy();
-        }
-        self.framebuffers.deinit();
+        allocator.free(self.frame_fds);
         // allocator.destroy(self); //check why this fails
     }
 
