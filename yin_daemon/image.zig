@@ -129,7 +129,7 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
         const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
 
-        //only because image struct needs this
+        //only because image struct needs this, todo: fix this
         var pixel_data = std.ArrayList(u32).init(allocator);
         defer pixel_data.deinit();
         const src_img = pixman.Image.createBits(
@@ -140,6 +140,8 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(stride * width),
         );
         var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
+
+        //write image directly to shm
         const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
         //defer std.posix.close(fd);
         const size = output_width * output_stride;
@@ -152,7 +154,6 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             fd,
             0,
         );
-        defer std.posix.munmap(data);
         const target_pixman = pixman.Image.createBits(
             .a8r8g8b8,
             @intCast(output_width),
@@ -180,9 +181,7 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @intCast(output.height * @as(u32, @intCast(output.scale))),
         );
         frame_fds[i] = fd;
-        // std.posix.munmap(poolbuffer.memory_map);
-        // try poolbuffers.append(poolbuffer.*);
-        // if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
+        if (i % 5 == 0) _ = output.daemon.wlDisplay.flush();
         std.log.debug("Appended buffer \r\n", .{});
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
