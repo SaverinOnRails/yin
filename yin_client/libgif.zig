@@ -4,7 +4,6 @@
 
 const std = @import("std");
 const stb = @import("stb");
-const shrink = @import("downsize.zig");
 const shared = @import("shared");
 const gif = @import("gif");
 const lz4 = @import("shared").lz4;

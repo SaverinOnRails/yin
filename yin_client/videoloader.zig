@@ -1,7 +1,6 @@
 const std = @import("std");
 const stb = @import("stb");
 const ffmpeg = @import("ffmpeg");
-const shrink = @import("downsize.zig");
 const shared = @import("shared");
 const lz4 = shared.lz4;
 const allocator = std.heap.page_allocator;
