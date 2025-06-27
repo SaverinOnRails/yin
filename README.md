@@ -35,5 +35,9 @@ The control it with yinctl
 yinctl --help
 ```
 
-
+# TODO
+- Resize to best resolution for monitor
+- Use DMABUF instead of wl_shm
+- Maybe some slide transitions with pixman
+- Cleanup god awful code
 
