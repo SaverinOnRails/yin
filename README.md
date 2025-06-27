@@ -6,8 +6,9 @@ Currently, can display many image formats : png, jpeg, gif and even mp4 videos i
 ## Dependencies
 - Wayland client and protocols
 - Zig 0.14
-- LZ4
-- ffmpeg
+- LZ4 for compression
+- ffmpeg for rendering videos
+- stb for resizing images
 
 
 # Build

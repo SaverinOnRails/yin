@@ -3,7 +3,9 @@
 // zigimg is slow and afaik does not support sequential loading meaning the entire potentially large gif will need to be loaded into memory
 
 const std = @import("std");
+const stb = @import("stb");
 const shrink = @import("downsize.zig");
+const shared = @import("shared");
 const gif = @import("gif");
 const lz4 = @import("shared").lz4;
 const GIF_ERROR = gif.GIF_ERROR;
@@ -20,7 +22,7 @@ pub fn initCompositeBuffer(width: usize, height: usize) !void {
     @memset(composite_buffer.?, 0x00000000); //check if background color will work here
 }
 
-pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: bool) !void {
+pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
     var error_code: c_int = undefined;
     const file = gif.DGifOpenFileName(@ptrCast(path), &error_code) orelse return error.CouldNotLoadGif;
     const framecount = number_of_frames(path);
@@ -34,10 +36,10 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: boo
     var width: u32 = @intCast(canvas_width);
     std.log.debug("Caching GIF. Resolution : {d}x{d}", .{ width, height });
     if (downsize) {
-        if (height > 1080 or width > 1920) {
-            std.log.info("Downsizing to full HD", .{});
-            height = 1080;
-            width = 1920;
+        if (height > monitor_size.height or width > monitor_size.width) {
+            std.log.info("Downsizing to {}x{}", .{ monitor_size.width, monitor_size.height });
+            height = monitor_size.height;
+            width = monitor_size.width;
         }
     }
     //write number of frames
@@ -106,13 +108,7 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: boo
                     file.*.ExtensionBlocks = null;
                     file.*.ExtensionBlockCount = 0;
                 }
-                try iter(
-                    file,
-                    IMAGE,
-                    gcb,
-                    file_handle,
-                    downsize,
-                );
+                try iter(file, IMAGE, gcb, file_handle, downsize, monitor_size);
                 const image_count: i32 = @intCast(file.*.ImageCount);
                 const frame_count_f32: f32 = @floatFromInt(framecount);
                 const image_count_f32: f32 = @floatFromInt(image_count);
@@ -137,7 +133,14 @@ pub fn load_gif(path: []const u8, file_handle: *const std.fs.File, downsize: boo
     }
 }
 
-pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.GraphicsControlBlock, file_handle: *const std.fs.File, downsize: bool) !void {
+pub fn iter(
+    file: [*c]gif.GifFileType,
+    savedImage: [*c]gif.SavedImage,
+    gcb: gif.GraphicsControlBlock,
+    file_handle: *const std.fs.File,
+    downsize: bool,
+    monitor_size: shared.MonitorSize,
+) !void {
     const colorMap = savedImage.*.ImageDesc.ColorMap orelse file.*.SColorMap;
     const frame_width: usize = @intCast(savedImage.*.ImageDesc.Width);
     const frame_height: usize = @intCast(savedImage.*.ImageDesc.Height);
@@ -177,19 +180,25 @@ pub fn iter(file: [*c]gif.GifFileType, savedImage: [*c]gif.SavedImage, gcb: gif.
     try file_handle.writer().writeInt(u32, float_as_bytes.len, .little);
     try file_handle.writer().writeAll(std.mem.asBytes(&duration));
     const _pixel_data = composite_buffer.?;
-    const pixel_data = if (downsize and (canvas_width > 1920 or canvas_height > 1080)) blk: {
-        const resized_data = try shrink.downsampleBilinear(
-            _pixel_data,
+    const pixel_data = if (downsize and (canvas_width > monitor_size.width or canvas_height > monitor_size.height)) blk: {
+        const pixel_data_u8 = std.mem.sliceAsBytes(_pixel_data);
+        const output_pixels_u8 = try allocator.alloc(u8, monitor_size.height * monitor_size.width * @sizeOf(u32));
+        _ = stb.stbir_resize_uint8_srgb(
+            @ptrCast(@alignCast(pixel_data_u8.ptr)),
             @intCast(canvas_width),
             @intCast(canvas_height),
-            1920,
-            1080,
-            allocator,
+            0,
+            @ptrCast(@alignCast(output_pixels_u8.ptr)),
+            @intCast(monitor_size.width),
+            @intCast(monitor_size.height),
+            0,
+            4,
         );
-        break :blk resized_data;
+        const output_pixels_u32 = std.mem.bytesAsSlice(u32, output_pixels_u8);
+        break :blk output_pixels_u32;
     } else _pixel_data;
 
-    defer if (downsize and (canvas_width > 1920 or canvas_height > 1080)) {
+    defer if (downsize and (canvas_width > monitor_size.width or canvas_height > monitor_size.height)) {
         allocator.free(pixel_data);
     };
     const len = pixel_data.len;

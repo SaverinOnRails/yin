@@ -2,6 +2,7 @@ const std = @import("std");
 const shrink = @import("downsize.zig");
 const flags = @import("flags");
 const libgif = @import("libgif.zig");
+const stb = @import("stb");
 const videoloader = @import("videoloader.zig");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
@@ -77,6 +78,30 @@ pub fn main() !void {
     defer stream.close();
     std.log.info("Request sent to Daemon", .{});
 }
+
+//todo: this should take an output identifier
+fn get_monitor_dimensions(stream: *const std.net.Stream) !shared.MonitorSize {
+    const msg: shared.Message = shared.Message.MonitorSize;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    try shared.SerializeMessage(msg, buffer.writer());
+    _ = try stream.write(buffer.items);
+    //read reply
+    var buf: [100]u8 = undefined;
+    const bytes_read = try stream.read(&buf);
+    const res = buf[0..bytes_read];
+
+    const x_pos = std.mem.indexOf(u8, res, "x") orelse return error.InvalidDimensions;
+    const width_str = res[0..x_pos];
+    const height_str = res[x_pos + 1 ..];
+    const width = try std.fmt.parseInt(u32, width_str, 10);
+    const height = try std.fmt.parseInt(u32, height_str, 10);
+    return .{
+        .width = width,
+        .height = height,
+    };
+}
+
 fn print_help() void {
     const help =
         \\ Yin, An efficient wallpaper daemon for Wayland Compositors, controlled at runtime
@@ -98,7 +123,7 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool) !vo
     defer allocator.free(cache_file_path);
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
         //any error here likely means it could not open the file, cache then
-        cache_file_path = try cache_image(path, downsize);
+        cache_file_path = try cache_image(path, downsize, stream);
     };
     const msg: shared.Message = .{
         .Image = .{ .path = cache_file_path },
@@ -127,7 +152,10 @@ fn send_restore(stream: *const std.net.Stream) !void {
     _ = try stream.write(buffer.items);
 }
 
-fn send_toggle_play(play: bool, stream: *const std.net.Stream) !void {
+fn send_toggle_play(
+    play: bool,
+    stream: *const std.net.Stream,
+) !void {
     var msg: shared.Message = undefined;
     if (play == true) {
         msg = shared.Message.Play;
@@ -140,7 +168,13 @@ fn send_toggle_play(play: bool, stream: *const std.net.Stream) !void {
     _ = try stream.write(buffer.items);
 }
 
-fn cache_image(path: []const u8, downsize: bool) ![]u8 {
+fn cache_image(
+    path: []const u8,
+    downsize: bool,
+    stream: *const std.net.Stream,
+) ![]u8 {
+    const monitor_size = try get_monitor_dimensions(stream);
+    std.log.info("Requested monitor has dimensions {d}x{d}", .{ monitor_size.width, monitor_size.height });
     //create paths
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
     const cache_dir = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin" });
@@ -157,10 +191,10 @@ fn cache_image(path: []const u8, downsize: bool) ![]u8 {
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
     //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
     if (std.mem.endsWith(u8, path, ".gif") or std.mem.endsWith(u8, path, ".mp4")) {
-        try cache_animated_gif(path, &pixel_cache_file,downsize);
+        try cache_animated_gif(path, &pixel_cache_file, downsize, monitor_size);
         return pixel_cache_file_path;
     }
-    std.log.info("Loading Image...",.{});
+    std.log.info("Loading Image...", .{});
     var image = try zigimg.Image.fromFilePath(allocator, path);
     std.log.info("Caching image. Resolution : {d}x{d}", .{ image.width, image.width });
     defer image.deinit();
@@ -174,22 +208,27 @@ fn cache_image(path: []const u8, downsize: bool) ![]u8 {
     var WIDTH = image.width;
     if (downsize) {
         //only downsize if need be
-        if (image.width > 1920 or image.height > 1080) {
-            std.log.info("Downsizing to full HD", .{});
-            const resized_data = try shrink.downsampleBilinear(
-                pixel_data.items,
+        if (image.width > monitor_size.width or image.height > monitor_size.height) {
+            std.log.info("Downsizing to  {d}x{d}", .{ monitor_size.width, monitor_size.height });
+            const pixel_data_u8 = std.mem.sliceAsBytes(pixel_data.items);
+            const output_pixels_u8 = try allocator.alloc(u8, monitor_size.height * monitor_size.width * @sizeOf(u32));
+            _ = stb.stbir_resize_uint8_srgb(
+                @ptrCast(@alignCast(pixel_data_u8.ptr)),
                 @intCast(image.width),
                 @intCast(image.height),
-                1920,
-                1080,
-                allocator,
+                0,
+                @ptrCast(@alignCast(output_pixels_u8.ptr)),
+                @intCast(monitor_size.width),
+                @intCast(monitor_size.height),
+                0,
+                4,
             );
-            defer allocator.free(resized_data);
+            const output_pixels_u32 = std.mem.bytesAsSlice(u32, output_pixels_u8);
             pixel_data.clearRetainingCapacity();
-            try pixel_data.resize(@intCast(1080 * 1920));
-            @memcpy(pixel_data.items, resized_data);
-            WIDTH = 1920;
-            HEIGHT = 1080;
+            try pixel_data.resize(monitor_size.height * monitor_size.width);
+            @memcpy(pixel_data.items, output_pixels_u32);
+            WIDTH = monitor_size.width;
+            HEIGHT = monitor_size.height;
         }
     }
 
@@ -222,15 +261,15 @@ fn cache_image(path: []const u8, downsize: bool) ![]u8 {
     return pixel_cache_file_path;
 }
 
-fn cache_animated_gif(path: []const u8, file: *const std.fs.File, downsize: bool) !void {
+fn cache_animated_gif(path: []const u8, file: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
     //write animated since it is  animated
     const animated = "animated";
     try file.writer().writeInt(u8, animated.len, .little);
     try file.writer().writeAll(animated);
     if (std.mem.endsWith(u8, path, ".gif")) {
-        try libgif.load_gif(path, file, downsize);
+        try libgif.load_gif(path, file, downsize, monitor_size);
     } else {
-        try videoloader.load_video(path, file, downsize);
+        try videoloader.load_video(path, file, downsize, monitor_size);
     }
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {

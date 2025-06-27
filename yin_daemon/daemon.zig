@@ -68,7 +68,12 @@ pub fn init() !void {
             const conn = try server.accept();
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
-            daemon.handle_ipc_message(message);
+            daemon.handle_ipc_message(message, &conn) catch continue;
+            //expect follow up message
+            if (message == .MonitorSize) {
+                const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
+                daemon.handle_ipc_message(follow_up, &conn) catch return;
+            }
         }
         //go through animations
         var it = daemon.animations.first;
@@ -163,7 +168,7 @@ fn toggle_play(daemon: *Daemon, play: bool) void {
         }
     }
 }
-fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
+fn handle_ipc_message(daemon: *Daemon, message: shared.Message, conn: *const std.net.Server.Connection) !void {
     switch (message) {
         .Image => |s| {
             daemon.configure(message);
@@ -181,6 +186,15 @@ fn handle_ipc_message(daemon: *Daemon, message: shared.Message) void {
         },
         .Play => {
             daemon.toggle_play(true);
+        },
+        .MonitorSize => {
+            //return the dimensions of the requested output, TODO: should take an output identifier
+            //first output for now
+            const output = daemon.Outputs.first.?.data;
+            if (!output.configured) return;
+            var buffer: [100]u8 = undefined;
+            const dim = try std.fmt.bufPrint(&buffer, "{d}x{d}", .{ output.width, output.height });
+            try conn.stream.writer().writeAll(dim);
         },
     }
 }

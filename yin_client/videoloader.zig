@@ -1,9 +1,11 @@
 const std = @import("std");
+const stb = @import("stb");
 const ffmpeg = @import("ffmpeg");
 const shrink = @import("downsize.zig");
-const lz4 = @import("shared").lz4;
+const shared = @import("shared");
+const lz4 = shared.lz4;
 const allocator = std.heap.page_allocator;
-pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool) !void {
+pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
     var fmt_ctx: [*c]ffmpeg.AVFormatContext = null;
     var codec_ctx: [*c]ffmpeg.AVCodecContext = null;
     var rgb_frame: [*c]ffmpeg.AVFrame = null;
@@ -80,10 +82,10 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool) !v
     var width: u32 = @intCast(WIDTH);
     std.log.info("Caching video. Resolution : {d}x{d}", .{ width, height });
     if (downsize) {
-        if (height > 1080 or width > 1920) {
-            std.log.info("Downsizing to full HD", .{});
-            height = 1080;
-            width = 1920;
+        if (height > monitor_size.height or width > monitor_size.width) {
+            std.log.info("Downsizing to {d}x{d}", .{ monitor_size.width, monitor_size.height });
+            height = monitor_size.height;
+            width = monitor_size.width;
         }
     }
     //write number of frames
@@ -94,7 +96,6 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool) !v
     try file.writer().writeInt(u32, @intCast(width), .little);
     //write stride
     try file.writer().writeInt(u8, 4, .little); //this still isnt stride
-
     const argb_buffer_size = ffmpeg.av_image_get_buffer_size(ffmpeg.AV_PIX_FMT_ARGB, WIDTH, HEIGHT, 1);
     var frame_count: usize = 0;
     while (ffmpeg.av_read_frame(fmt_ctx, packet) >= 0) {
@@ -116,6 +117,7 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool) !v
                     downsize,
                     @intCast(HEIGHT),
                     @intCast(WIDTH),
+                    monitor_size,
                 );
                 const image_count: u32 = @intCast(frame_count);
                 const frame_count_f32: f32 = @floatFromInt(total_frames);
@@ -127,7 +129,7 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool) !v
     }
 }
 
-fn iter(buffer: []u32, file: *const std.fs.File, downsize: bool, height: usize, width: usize) !void {
+fn iter(buffer: []u32, file: *const std.fs.File, downsize: bool, height: usize, width: usize, monitor_size: shared.MonitorSize) !void {
     // defer allocator.free(buffer);
     //write duration , assume 25 ms for now
     const duration: f32 = 0.025;
@@ -136,18 +138,24 @@ fn iter(buffer: []u32, file: *const std.fs.File, downsize: bool, height: usize, 
     try file.writer().writeAll(float_as_bytes);
 
     const _pixel_data = buffer;
-    const pixel_data = if (downsize and (width > 1920 or height > 1080)) blk: {
-        const resized_data = try shrink.downsampleBilinear(
-            _pixel_data,
+    const pixel_data = if (downsize and (width > monitor_size.width or height > monitor_size.height)) blk: {
+        const pixel_data_u8 = std.mem.sliceAsBytes(_pixel_data);
+        const output_pixels_u8 = try allocator.alloc(u8, monitor_size.height * monitor_size.width * @sizeOf(u32));
+        _ = stb.stbir_resize_uint8_srgb(
+            @ptrCast(@alignCast(pixel_data_u8.ptr)),
             @intCast(width),
             @intCast(height),
-            1920,
-            1080,
-            allocator,
+            0,
+            @ptrCast(@alignCast(output_pixels_u8.ptr)),
+            @intCast(monitor_size.width),
+            @intCast(monitor_size.height),
+            0,
+            4,
         );
-        break :blk resized_data;
+        const output_pixels_u32 = std.mem.bytesAsSlice(u32, output_pixels_u8);
+        break :blk output_pixels_u32;
     } else _pixel_data;
-    defer if (downsize and (width > 1920 or height > 1080)) {
+    defer if (downsize and (width > monitor_size.width or height > monitor_size.height)) {
         allocator.free(pixel_data);
     };
 

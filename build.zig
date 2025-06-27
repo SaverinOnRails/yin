@@ -37,7 +37,34 @@ pub fn build(b: *std.Build) void {
     yin_daemon.linkSystemLibrary("pixman-1");
     yin_daemon.linkLibC();
     yin_client.linkLibC();
-
+    const stb = b.addTranslateC(.{
+        .root_source_file = b.addWriteFiles().add("./stub.h",
+            \\#include <stb/stb_image_resize2.h>
+        ),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    stb.addIncludePath(b.path("./stb"));
+    const stb_root_module = b.createModule(.{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+        .sanitize_c = false
+    });
+    stb_root_module.addCSourceFile(.{
+        .file = b.addWriteFiles().add("./stb.c",
+            \\#define STB_IMAGE_RESIZE_IMPLEMENTATION
+            \\#include <stb/stb_image_resize2.h>
+        ),
+    });
+    const stb_lib = b.addLibrary(.{
+        .root_module = stb_root_module,
+        .name = "stb",
+    });
+    stb_lib.linkLibC();
+    stb_lib.addIncludePath(b.path("stb"));
+    yin_client.linkLibrary(stb_lib);
     const zigimg_dependency = b.dependency("zigimg", .{
         .target = target,
         .optimize = optimize,
@@ -72,12 +99,14 @@ pub fn build(b: *std.Build) void {
     yin_client.root_module.addImport("gif", gif.createModule());
     yin_client.root_module.addImport("ffmpeg", ffmpeg.createModule());
     yin_client.linkSystemLibrary("lz4");
+    yin_client.root_module.addImport("stb", stb.createModule());
     yin_daemon.linkSystemLibrary("lz4");
     yin_client.linkSystemLibrary("MagickWand-7.Q16HDRI");
     yin_client.linkSystemLibrary("libswscale");
     yin_client.linkSystemLibrary("avformat");
     yin_client.linkSystemLibrary("avcodec");
     yin_client.linkSystemLibrary("avutil");
+
     b.installArtifact(yin_daemon);
     b.installArtifact(yin_client);
 }
