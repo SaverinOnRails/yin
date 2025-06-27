@@ -35,6 +35,12 @@ The control it with yinctl
 yinctl --help
 ```
 
+
+
+https://github.com/user-attachments/assets/e97912b1-6d31-4ee8-800b-73f1c1de1a7e
+
+
+
 # TODO
 - Resize to best resolution for monitor
 - Use DMABUF instead of wl_shm
