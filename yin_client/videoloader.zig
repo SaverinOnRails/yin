@@ -3,7 +3,7 @@ const stb = @import("stb");
 const ffmpeg = @import("ffmpeg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
-const allocator = std.heap.page_allocator;
+pub const allocator = std.heap.page_allocator;
 pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
     var fmt_ctx: [*c]ffmpeg.AVFormatContext = null;
     var codec_ctx: [*c]ffmpeg.AVCodecContext = null;
@@ -102,22 +102,19 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool, mo
             _ = ffmpeg.avcodec_send_packet(codec_ctx, packet);
             defer ffmpeg.av_packet_unref(packet);
             while (ffmpeg.avcodec_receive_frame(codec_ctx, frame) == 0) {
+                const avg_frame_rate = fmt_ctx.*.streams[video_stream_index].*.avg_frame_rate;
+                const frame_duration_seconds = @as(f64, @floatFromInt(avg_frame_rate.den)) /
+                    @as(f64, @floatFromInt(avg_frame_rate.num));
                 const argb_buffer = try allocator.alignedAlloc(u8, @alignOf(u32), @intCast(argb_buffer_size));
                 defer allocator.free(argb_buffer);
+
                 // Setup RGB frame
                 _ = ffmpeg.av_image_fill_arrays(&rgb_frame.*.data[0], &rgb_frame.*.linesize[0], argb_buffer.ptr, ffmpeg.AV_PIX_FMT_ARGB, WIDTH, HEIGHT, 1);
                 frame_count += 1;
                 _ = ffmpeg.sws_scale(sws_ctx, @ptrCast(&frame.*.data[0]), &frame.*.linesize[0], 0, HEIGHT, @ptrCast(&rgb_frame.*.data[0]), &rgb_frame.*.linesize[0]);
                 const pixel_count = @as(usize, @intCast(WIDTH * HEIGHT));
                 const argb_pixels: []u32 = std.mem.bytesAsSlice(u32, argb_buffer[0 .. pixel_count * 4]);
-                try iter(
-                    argb_pixels,
-                    file,
-                    downsize,
-                    @intCast(HEIGHT),
-                    @intCast(WIDTH),
-                    monitor_size,
-                );
+                try iter(argb_pixels, file, downsize, @intCast(HEIGHT), @intCast(WIDTH), monitor_size, frame_duration_seconds);
                 const image_count: u32 = @intCast(frame_count);
                 const frame_count_f32: f32 = @floatFromInt(total_frames);
                 const image_count_f32: f32 = @floatFromInt(image_count);
@@ -128,14 +125,20 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool, mo
     }
 }
 
-fn iter(buffer: []u32, file: *const std.fs.File, downsize: bool, height: usize, width: usize, monitor_size: shared.MonitorSize) !void {
+fn iter(
+    buffer: []u32,
+    file: *const std.fs.File,
+    downsize: bool,
+    height: usize,
+    width: usize,
+    monitor_size: shared.MonitorSize,
+    frame_duration: f64,
+) !void {
     // defer allocator.free(buffer);
-    //write duration , assume 25 ms for now
-    const duration: f32 = 0.025;
+    const duration: f32 = @floatCast(frame_duration);
     const float_as_bytes = std.mem.asBytes(&duration);
     try file.writer().writeInt(u32, float_as_bytes.len, .little);
     try file.writer().writeAll(float_as_bytes);
-
     const _pixel_data = buffer;
     const pixel_data = if (downsize and (width > monitor_size.width or height > monitor_size.height)) blk: {
         const pixel_data_u8 = std.mem.sliceAsBytes(_pixel_data);
@@ -165,12 +168,11 @@ fn iter(buffer: []u32, file: *const std.fs.File, downsize: bool, height: usize, 
     const pixel_bytes = std.mem.sliceAsBytes(pixel_data);
     const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
     const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
-    const compressed_size = lz4.LZ4_compress_HC(
+    const compressed_size = lz4.LZ4_compress_default(
         @ptrCast(@alignCast(pixel_bytes.ptr)),
         @ptrCast(@alignCast(compressed_buffer.ptr)),
         @intCast(pixel_bytes.len),
         @intCast(max_compressed_size),
-        10,
     );
     defer allocator.free(compressed_buffer);
     //write compressed length

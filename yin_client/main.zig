@@ -1,13 +1,12 @@
 const std = @import("std");
 const flags = @import("flags");
-const libgif = @import("libgif.zig");
 const stb = @import("stb");
 const videoloader = @import("videoloader.zig");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
-const allocator = libgif.allocator;
+const allocator = @import("videoloader.zig").allocator;
 const Arguments = struct {
     img: ?[]u8 = null,
     color: ?[]u8 = null,
@@ -131,6 +130,13 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool) !vo
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
+    std.log.info("Applying...", .{});
+    // wait for a reading
+    var dummy: [1]u8 = undefined;
+    _ = stream.read(&dummy) catch |err| switch (err) {
+        error.BrokenPipe => {}, // Expected when server closes
+        else => return err,
+    };
 }
 
 fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
@@ -149,6 +155,11 @@ fn send_restore(stream: *const std.net.Stream) !void {
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
+    var dummy: [1]u8 = undefined;
+    _ = stream.read(&dummy) catch |err| switch (err) {
+        error.BrokenPipe => {}, // Expected when server closes
+        else => return err,
+    };
 }
 
 fn send_toggle_play(
@@ -265,11 +276,7 @@ fn cache_animated_gif(path: []const u8, file: *const std.fs.File, downsize: bool
     const animated = "animated";
     try file.writer().writeInt(u8, animated.len, .little);
     try file.writer().writeAll(animated);
-    if (std.mem.endsWith(u8, path, ".gif")) {
-        try libgif.load_gif(path, file, downsize, monitor_size);
-    } else {
-        try videoloader.load_video(path, file, downsize, monitor_size);
-    }
+    try videoloader.load_video(path, file, downsize, monitor_size);
 }
 fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
     var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);

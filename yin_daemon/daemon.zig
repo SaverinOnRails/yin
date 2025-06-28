@@ -71,8 +71,8 @@ pub fn init() !void {
             daemon.handle_ipc_message(message, &conn) catch continue;
             //expect follow up message
             if (message == .MonitorSize) {
-                const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
-                daemon.handle_ipc_message(follow_up, &conn) catch return;
+                const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
+                daemon.handle_ipc_message(follow_up, &conn) catch continue;
             }
         }
         //go through animations
