@@ -15,7 +15,6 @@ const Arguments = struct {
     play: ?bool = null,
     downsize: ?bool = true,
 };
-
 fn parse_args() !Arguments {
     const argv = std.os.argv;
     var args: Arguments = .{};

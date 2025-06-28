@@ -210,7 +210,6 @@ fn calculate_transform(image_dimension: c_int, output_dimension: u32, dimension_
 
     return numerator2 / 2 / dimension_scale;
 }
-
 //transform, thanks beanbag
 pub fn Scale(self: *Image, width: u32, height: u32, scale: u32) void {
     var image = self.src;

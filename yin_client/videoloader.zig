@@ -119,7 +119,7 @@ pub fn load_video(path: []const u8, file: *const std.fs.File, downsize: bool, mo
                 const frame_count_f32: f32 = @floatFromInt(total_frames);
                 const image_count_f32: f32 = @floatFromInt(image_count);
                 const percentage: f32 = (image_count_f32 / frame_count_f32) * 100.0;
-                try std.io.getStdOut().writer().print("\rCaching mp4: {d}%/100%...", .{@round(percentage * 100) / 100});
+                try std.io.getStdOut().writer().print("\rCaching video: {d}%/100%...", .{@round(percentage * 100) / 100});
             }
         }
     }
