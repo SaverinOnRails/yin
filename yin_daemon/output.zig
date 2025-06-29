@@ -114,7 +114,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
     }
     switch (render_type) {
         .Image => |s| {
-            try output.render_image(s.path);
+            try output.render_image(s.path, s.transition);
         },
         .Color => |c| {
             try output.render_solid_color(c.hexcode);
@@ -144,14 +144,14 @@ fn restore_wallpaper(output: *Output) !void {
 
     const bytes_read = try wallpaper_path.readAll(buffer.items);
     const paper_path = buffer.items[0..bytes_read];
-    try output.render_image(paper_path);
+    try output.render_image(paper_path, .BottomTop);
 }
 
-fn render_image(output: *Output, path: []u8) !void {
+fn render_image(output: *Output, path: []u8, transition: shared.Transition) !void {
     const src_img = try image.load_image(path, output) orelse return error.CouldNotLoadImage;
     switch (src_img) {
         .Static => |s| {
-            try output.render_static_image(s.image);
+            try output.render_static_image(s.image, transition);
         },
         .Animated => |s| {
             const node = try allocator.create(std.SinglyLinkedList(AnimatedImage).Node);
@@ -174,7 +174,7 @@ fn render_image(output: *Output, path: []u8) !void {
     };
 }
 
-fn render_static_image(output: *Output, img: *image.Image) !void {
+fn render_static_image(output: *Output, img: *image.Image, transition: shared.Transition) !void {
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
 
@@ -183,16 +183,18 @@ fn render_static_image(output: *Output, img: *image.Image) !void {
         std.log.err("Failed to create buffer", .{});
         return;
     };
-    if (output.current_mmap) |mmap| {
-        //todo: very annoying memory leak here
-        try Transition.play_transition(
-            mmap,
-            poolbuffer.pixman_image,
-            output,
-            poolbuffer,
-            .bottom_top,
-        );
-        return;
+    if (transition != .None) {
+        if (output.current_mmap) |mmap| {
+            //todo: very annoying memory leak here
+            try Transition.play_transition(
+                mmap,
+                poolbuffer.pixman_image,
+                output,
+                poolbuffer,
+                Transition.SlideDirection.from_shared_transition(transition),
+            );
+            return;
+        }
     }
     output.current_mmap = poolbuffer.memory_map;
     surface.attach(poolbuffer.wlBuffer, 0, 0);

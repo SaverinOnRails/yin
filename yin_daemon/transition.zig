@@ -5,11 +5,22 @@ const wl = @import("wayland").client.wl;
 const Output = @import("output.zig").Output;
 const PoolBuffer = @import("Buffer.zig").PoolBuffer;
 const allocator = @import("util.zig").allocator;
+const shared = @import("shared");
 pub const SlideDirection = enum {
     left_right,
     right_left,
     top_bottom,
     bottom_top,
+
+    pub fn from_shared_transition(trans: shared.Transition) SlideDirection { //todo: this is fucking retarded
+        return switch (trans) {
+            .BottomTop => return .bottom_top,
+            .TopBottom => return .top_bottom,
+            .LeftRight => return .left_right,
+            .RightLeft => return .right_left,
+            .None => unreachable, //impossible
+        };
+    }
 };
 
 pub fn play_transition(

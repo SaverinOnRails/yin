@@ -7,6 +7,7 @@ const zigimg = @import("zigimg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
 const allocator = @import("videoloader.zig").allocator;
+const Transition = shared.Transition;
 const Arguments = struct {
     img: ?[]u8 = null,
     color: ?[]u8 = null,
@@ -14,6 +15,7 @@ const Arguments = struct {
     pause: ?bool = null,
     play: ?bool = null,
     downsize: ?bool = true,
+    transition: Transition = .BottomTop,
 };
 fn parse_args() !Arguments {
     const argv = std.os.argv;
@@ -50,9 +52,17 @@ fn parse_args() !Arguments {
             }
             args.downsize = std.mem.orderZ(u8, argv[i + 1], "true") == .eq;
         }
+        if (std.mem.order(u8, arg_span, "--trans") == .eq) {
+            if (i + 1 >= argv.len) {
+                std.log.err("No transition provided to --trans flag. Valid options are 'top-bottom' 'bottom-top' 'left-right' 'right-left' and 'none'", .{});
+                return error.NoTransition;
+            }
+            args.transition = try Transition.from_string(std.mem.span(argv[i + 1]));
+        }
     }
     return args;
 }
+
 pub fn main() !void {
     const args = try parse_args();
     const stream = std.net.connectUnixSocket("/tmp/yin") catch {
@@ -60,7 +70,7 @@ pub fn main() !void {
         std.posix.exit(1);
     };
     if (args.img) |img| {
-        try send_set_image(img, &stream, args.downsize.?);
+        try send_set_image(img, &stream, args.downsize.?, args.transition);
     } else if (args.color) |color| {
         try send_hex_code(color, &stream);
     } else if (args.restore) |restore| {
@@ -108,11 +118,12 @@ fn print_help() void {
         \\ --pause                            Pause an animated gif on the output
         \\ --play                             Play or resume an animated gif on the output
         \\ --downsize                         Resize larger images down to full HD to conserve disk space
+        \\ --trans                            Pass a direction for the sliding transition. Valid options are 'top-bottom' 'bottom-top' 'left-right' 'right-left' or 'none' for none.
     ;
     std.debug.print(help, .{});
     std.posix.exit(1);
 }
-fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool) !void {
+fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool, transition: shared.Transition) !void {
     //check if a cache file fot this exists
     const safe_name = try sanitizeForFilename(path);
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
@@ -123,7 +134,7 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool) !vo
         cache_file_path = try cache_image(path, downsize, stream);
     };
     const msg: shared.Message = .{
-        .Image = .{ .path = cache_file_path },
+        .Image = .{ .path = cache_file_path, .transition = transition },
     };
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
