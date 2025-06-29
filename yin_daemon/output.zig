@@ -1,6 +1,7 @@
 const wl = @import("wayland").client.wl;
 const std = @import("std");
 const util = @import("util.zig");
+const Transition = @import("transition.zig");
 const image = @import("image.zig");
 const shared = @import("shared");
 const AnimatedImage = @import("animation.zig").AnimatedImage;
@@ -17,6 +18,7 @@ scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
 daemon: *Daemon,
+current_mmap: ?[]align(4096) u8 = null, //reference to the data of the current surface
 paused: bool = false,
 needs_reload: bool = false,
 identifier: ?[]u8 = null,
@@ -33,10 +35,6 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
         },
         .done => {
             if (output.zwlrLayerSurface) |_| return;
-            //init buffer ring
-            for (0..2) |_| {
-                _ = PoolBuffer.add_buffer_to_ring(output);
-            }
             create_layer_surface(output) catch return;
         },
         .geometry => {}, //for transformation maybe?
@@ -179,12 +177,27 @@ fn render_image(output: *Output, path: []u8) !void {
 fn render_static_image(output: *Output, img: *image.Image) !void {
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
-    const buffer = PoolBuffer.get_static_image_buffer(output, img) catch {
+
+    //force a new buffer when using transitions to avoid overwriting the memory of the current output
+    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, true) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
-    surface.attach(buffer, 0, 0);
+    if (output.current_mmap) |mmap| {
+        //todo: very annoying memory leak here
+        try Transition.play_transition(
+            mmap,
+            poolbuffer.pixman_image,
+            output,
+            poolbuffer,
+            .bottom_top,
+        );
+        return;
+    }
+    output.current_mmap = poolbuffer.memory_map;
+    surface.attach(poolbuffer.wlBuffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
+    surface.setBufferScale(output.scale);
     surface.commit();
 }
 fn render_solid_color(output: *Output, hexcode: []u8) !void {
@@ -244,6 +257,7 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     const shmPool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shmPool.destroy();
     const wlBuffer = try shmPool.createBuffer(0, @intCast(width), @intCast(height), @intCast(stride), .argb8888);
+    output.current_mmap = null; //todo
     defer wlBuffer.destroy();
     // const poolbuffer = animated_image.framebuffers.items[animated_image.current_frame];
     const surface = output.wlSurface orelse return;

@@ -13,19 +13,18 @@ width: u32,
 busy: bool,
 used: bool = false,
 memory_map: []align(4096) u8 = undefined,
-data: [*]u32,
 pixman_image: *pixman.Image,
-const MAX_BUFFERS = 4;
-pub fn get_static_image_buffer(output: *Output, src_img: *image.Image) !*wl.Buffer {
+const MAX_BUFFERS = 2;
+pub fn get_static_image_buffer(output: *Output, src_img: *image.Image, force_new: bool) !*PoolBuffer {
     const scale: u32 = @intCast(output.scale);
     const scaled_width = output.width * scale;
     const scaled_height = output.height * scale;
-    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height) orelse return error.NoSuitableBuffer;
+    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height, force_new) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
     suitable_buffer.used = true;
     src_img.Scale(scaled_width, scaled_height, 1);
     pixman.Image.composite32(.src, src_img.src, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
-    return suitable_buffer.wlBuffer;
+    return suitable_buffer;
 }
 
 pub fn get_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
@@ -36,7 +35,7 @@ pub fn get_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
     hex_to_pixman_color(hex, &color);
     const solid = pixman.Image.createSolidFill(&color);
     defer _ = solid.?.unref();
-    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height) orelse return error.NoSuitableBuffer;
+    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height, false) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
     suitable_buffer.used = true;
     pixman.Image.composite32(.src, solid.?, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
@@ -59,7 +58,6 @@ pub fn new_buffer(output: *Output) !?*PoolBuffer {
     defer posix.close(fd);
     const size = height * stride;
     try posix.ftruncate(fd, @intCast(height * stride));
-
     const data = try posix.mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, .{ .TYPE = .SHARED }, fd, 0);
     const shm_pool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shm_pool.destroy();
@@ -75,7 +73,6 @@ pub fn new_buffer(output: *Output) !?*PoolBuffer {
         .width = width,
         .busy = false,
         .memory_map = data,
-        .data = data_slice,
         .pixman_image = pixman_image.?,
     };
     return poolbuffer;
@@ -92,20 +89,24 @@ fn buffer_listener(_: *wl.Buffer, event: wl.Buffer.Event, poolBuffer: *PoolBuffe
     }
 }
 
-pub fn next_buffer(output: *Output, width: u32, height: u32) ?*PoolBuffer {
+pub fn next_buffer(output: *Output, width: u32, height: u32, force_new: bool) ?*PoolBuffer {
+    if (force_new) {
+        // if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
+        return add_buffer_to_ring(output);
+    }
     var it = output.buffer_ring.first;
     while (it) |node| : (it = node.next) {
         if (node.data.width == width and node.data.height == height and node.data.busy == false) {
             return &node.data;
         }
     }
-    if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
-    //create a new buffer if needed
+    // create a new buffer if needed
     return add_buffer_to_ring(output);
 }
 
 fn trimBuffers(output: *Output) void {
     var it = output.buffer_ring.first;
+    std.log.debug("Trying to tirm buffers, len {d}", .{output.buffer_ring.len()});
     while (it) |node| {
         const next = node.next;
         if (node.data.busy == false and node.data.used == true) {
@@ -117,9 +118,11 @@ fn trimBuffers(output: *Output) void {
     }
 }
 pub fn deinit(poolBuffer: *PoolBuffer) void {
+    std.log.debug("Destroying buffer", .{});
     poolBuffer.wlBuffer.destroy();
     _ = poolBuffer.pixman_image.unref();
-    allocator.destroy(poolBuffer);
+    std.posix.munmap(poolBuffer.memory_map);
+    // allocator.destroy(poolBuffer);
 }
 
 pub fn add_buffer_to_ring(output: *Output) *PoolBuffer {

@@ -146,8 +146,7 @@ fn configure(daemon: *Daemon, render_type: shared.Message) void {
     //just render this on all outputs since i havent figured out per output yet
     var it = daemon.Outputs.first;
     while (it) |node| : (it = node.next) {
-        var output = node.data;
-        output.render(render_type) catch return;
+        node.data.render(render_type) catch return;
     }
 }
 
