@@ -10,7 +10,7 @@ const MessageTags = enum(u8) {
 };
 
 pub const Message = union(MessageTags) {
-    Image: struct { path: []u8, transition: Transition },
+    Image: struct { path: []u8, transition: Transition, output: ?[]u8 },
     Color: struct { hexcode: []u8 },
     Restore,
     Pause,
@@ -30,6 +30,13 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
             try writer.writeAll(s.path);
             //write transition
             try writer.writeInt(u8, @intFromEnum(s.transition), .little);
+            //write len of output_name
+            const output_name_len = if (s.output == null) 0 else s.output.?.len;
+            try writer.writeInt(u8, @intCast(output_name_len), .little);
+
+            if (s.output) |out| {
+                try writer.writeAll(out);
+            }
         },
         .Color => |c| {
             //write size
@@ -62,10 +69,23 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
             var buffer = try allocator.alloc(u8, len);
             defer allocator.free(buffer);
             const bytes_read = try reader.readAll(buffer);
-            const path = buffer[0..bytes_read];
+            const path = try allocator.dupe(u8, buffer[0..bytes_read]);
             const trans_tag = try reader.readInt(u8, .little);
             const trans: Transition = @enumFromInt(trans_tag);
-            return Message{ .Image = .{ .path = try allocator.dupe(u8, path), .transition = trans } };
+
+            //read output name
+            var output_name: ?[]u8 = null;
+            const output_name_len = try reader.readInt(u8, .little);
+            if (output_name_len > 0) {
+                buffer = try allocator.realloc(buffer, output_name_len);
+                const output_name_bytes_read = try reader.readAll(buffer);
+                output_name = try allocator.dupe(u8, buffer[0..output_name_bytes_read]);
+            }
+            return Message{ .Image = .{
+                .path = path,
+                .transition = trans,
+                .output = output_name,
+            } };
         },
         .Color => {
             const len = try reader.readInt(u32, .little);

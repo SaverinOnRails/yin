@@ -16,6 +16,7 @@ const Arguments = struct {
     play: ?bool = null,
     downsize: ?bool = true,
     transition: Transition = .BottomTop,
+    output: ?[]u8 = null,
 };
 fn parse_args() !Arguments {
     const argv = std.os.argv;
@@ -45,19 +46,26 @@ fn parse_args() !Arguments {
         if (std.mem.order(u8, arg_span, "--play") == .eq) {
             args.play = true;
         }
-        if (std.mem.order(u8, arg_span, "--downsize") == .eq) {
-            if (i + 1 >= argv.len) {
-                std.log.err("No argument provided to --downsize flag", .{});
-                return error.NoDownsize;
-            }
-            args.downsize = std.mem.orderZ(u8, argv[i + 1], "true") == .eq;
-        }
+        // if (std.mem.order(u8, arg_span, "--downsize") == .eq) {
+        //     if (i + 1 >= argv.len) {
+        //         std.log.err("No argument provided to --downsize flag", .{});
+        //         return error.NoDownsize;
+        //     }
+        //     args.downsize = std.mem.orderZ(u8, argv[i + 1], "true") == .eq;
+        // }
         if (std.mem.order(u8, arg_span, "--trans") == .eq) {
             if (i + 1 >= argv.len) {
                 std.log.err("No transition provided to --trans flag. Valid options are 'top-bottom' 'bottom-top' 'left-right' 'right-left' and 'none'", .{});
                 return error.NoTransition;
             }
             args.transition = try Transition.from_string(std.mem.span(argv[i + 1]));
+        }
+        if (std.mem.order(u8, arg_span, "--output") == .eq) {
+            if (i + 1 >= argv.len) {
+                std.log.err("No output provided to --output flag. Provide the name the compositor has assigned your output", .{});
+                return error.NoOutput;
+            }
+            args.output = std.mem.span(argv[i + 1]);
         }
     }
     return args;
@@ -70,7 +78,13 @@ pub fn main() !void {
         std.posix.exit(1);
     };
     if (args.img) |img| {
-        try send_set_image(img, &stream, args.downsize.?, args.transition);
+        try send_set_image(
+            img,
+            &stream,
+            args.downsize.?,
+            args.transition,
+            args.output,
+        );
     } else if (args.color) |color| {
         try send_hex_code(color, &stream);
     } else if (args.restore) |restore| {
@@ -117,13 +131,19 @@ fn print_help() void {
         \\ --restore                          Restore the previous set wallpaper
         \\ --pause                            Pause an animated gif on the output
         \\ --play                             Play or resume an animated gif on the output
-        \\ --downsize                         Resize larger images down to full HD to conserve disk space
         \\ --trans                            Pass a direction for the sliding transition. Valid options are 'top-bottom' 'bottom-top' 'left-right' 'right-left' or 'none' for none.
+        \\--output                            Specify an output to render on. You can obtain this from your wayland compositor. Ignoring this will render on all outputs
     ;
     std.debug.print(help, .{});
     std.posix.exit(1);
 }
-fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool, transition: shared.Transition) !void {
+fn send_set_image(
+    path: []u8,
+    stream: *const std.net.Stream,
+    downsize: bool,
+    transition: shared.Transition,
+    output: ?[]u8,
+) !void {
     //check if a cache file fot this exists
     const safe_name = try sanitizeForFilename(path);
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
@@ -134,7 +154,11 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool, tra
         cache_file_path = try cache_image(path, downsize, stream);
     };
     const msg: shared.Message = .{
-        .Image = .{ .path = cache_file_path, .transition = transition },
+        .Image = .{
+            .path = cache_file_path,
+            .transition = transition,
+            .output = output,
+        },
     };
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
@@ -142,11 +166,12 @@ fn send_set_image(path: []u8, stream: *const std.net.Stream, downsize: bool, tra
     _ = try stream.write(buffer.items);
     std.log.info("Applying...", .{});
     // wait for a reading
-    var dummy: [1]u8 = undefined;
-    _ = stream.read(&dummy) catch |err| switch (err) {
-        error.BrokenPipe => {}, // Expected when server closes
+    var response: [1000]u8 = undefined;
+    const bytes_read = stream.read(&response) catch |err| switch (err) {
+        error.BrokenPipe => return, // Expected when server closes
         else => return err,
     };
+    std.log.info("{s}", .{response[0..bytes_read]});
 }
 
 fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
