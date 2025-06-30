@@ -177,9 +177,8 @@ fn render_image(output: *Output, path: []u8, transition: shared.Transition) !voi
 fn render_static_image(output: *Output, img: *image.Image, transition: shared.Transition) !void {
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
-
     //force a new buffer when using transitions to avoid overwriting the memory of the current output
-    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, true) catch {
+    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, transition != .None) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
@@ -195,6 +194,9 @@ fn render_static_image(output: *Output, img: *image.Image, transition: shared.Tr
             );
             return;
         }
+    }
+    if (output.current_mmap) |mmap| {
+        std.posix.munmap(mmap);
     }
     output.current_mmap = poolbuffer.memory_map;
     surface.attach(poolbuffer.wlBuffer, 0, 0);

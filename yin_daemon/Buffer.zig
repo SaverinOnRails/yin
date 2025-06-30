@@ -12,7 +12,7 @@ height: u32,
 width: u32,
 busy: bool,
 used: bool = false,
-memory_map: []align(4096) u8 = undefined,
+memory_map: []align(4096) u8,
 pixman_image: *pixman.Image,
 const MAX_BUFFERS = 2;
 pub fn get_static_image_buffer(output: *Output, src_img: *image.Image, force_new: bool) !*PoolBuffer {
@@ -90,8 +90,8 @@ fn buffer_listener(_: *wl.Buffer, event: wl.Buffer.Event, poolBuffer: *PoolBuffe
 }
 
 pub fn next_buffer(output: *Output, width: u32, height: u32, force_new: bool) ?*PoolBuffer {
+    // if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
     if (force_new) {
-        // if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
         return add_buffer_to_ring(output);
     }
     var it = output.buffer_ring.first;
@@ -110,6 +110,7 @@ fn trimBuffers(output: *Output) void {
     while (it) |node| {
         const next = node.next;
         if (node.data.busy == false and node.data.used == true) {
+            std.log.debug("mmap len is {d}", .{node.data.memory_map.len});
             node.data.deinit();
             output.buffer_ring.remove(node);
             allocator.destroy(node);
@@ -121,7 +122,7 @@ pub fn deinit(poolBuffer: *PoolBuffer) void {
     std.log.debug("Destroying buffer", .{});
     poolBuffer.wlBuffer.destroy();
     _ = poolBuffer.pixman_image.unref();
-    std.posix.munmap(poolBuffer.memory_map);
+    // std.posix.munmap(poolBuffer.memory_map);
     // allocator.destroy(poolBuffer);
 }
 

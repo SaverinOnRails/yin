@@ -38,6 +38,7 @@ pub fn play_transition(
 
     const new_pixman_data_copy = try allocator.alloc(u32, height * width);
     defer allocator.free(new_pixman_data_copy);
+    defer std.posix.munmap(original_memory_map); 
 
     //create a copy of the new pixman image
     @memcpy(new_pixman_data_copy, new_pixman_ref.getData().?[0 .. height * width]);
@@ -58,7 +59,6 @@ pub fn play_transition(
         @intCast(stride),
     );
     defer _ = initial_pixman.?.unref();
-
     const transition_duration_ms: u64 = 500;
     const target_fps: u32 = 90;
     const frame_duration_ms: u64 = 1000 / target_fps;

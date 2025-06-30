@@ -6,7 +6,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const yin_daemon = b.addExecutable(.{ .name = "yin", .target = target, .optimize = optimize, .root_source_file = b.path("yin_daemon/main.zig") });
 
-    const yin_client = b.addExecutable(.{ .name = "yinctl", .target = target, .optimize = optimize, .root_source_file = b.path("yin_client/main.zig") });
+    const yin_client = b.addExecutable(.{
+        .name = "yinctl",
+        .target = target,
+        .optimize = optimize,
+        .root_source_file = b.path("yin_client/main.zig"),
+    });
 
     const run_step = b.step("run", "Run yin");
     const run_yin_daemon = b.addRunArtifact(yin_daemon);
@@ -46,12 +51,7 @@ pub fn build(b: *std.Build) void {
         .link_libc = true,
     });
     stb.addIncludePath(b.path("./stb"));
-    const stb_root_module = b.createModule(.{
-        .target = target,
-        .optimize = optimize,
-        .link_libc = true,
-        .sanitize_c = false
-    });
+    const stb_root_module = b.createModule(.{ .target = target, .optimize = optimize, .link_libc = true, .sanitize_c = false });
     stb_root_module.addCSourceFile(.{
         .file = b.addWriteFiles().add("./stb.c",
             \\#define STB_IMAGE_RESIZE_IMPLEMENTATION

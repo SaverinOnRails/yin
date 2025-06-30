@@ -1,3 +1,4 @@
+pub const std_options: std.Options= .{ .log_level = .info };
 const std = @import("std");
 const flags = @import("flags");
 const stb = @import("stb");
