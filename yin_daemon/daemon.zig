@@ -154,8 +154,8 @@ fn configure(daemon: *Daemon, render_type: shared.Message, conn: *const std.net.
         if (output_name) |out| {
             if (!std.mem.eql(u8, out, node.data.identifier.?)) continue;
         }
-        node.data.render(render_type) catch return;
         did_render = true;
+        node.data.render(render_type) catch return;
     }
     //could not find output
     if (!did_render) {

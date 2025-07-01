@@ -178,7 +178,7 @@ fn render_static_image(output: *Output, img: *image.Image, transition: shared.Tr
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
     //force a new buffer when using transitions to avoid overwriting the memory of the current output
-    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, transition != .None) catch {
+    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, true) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
@@ -261,11 +261,9 @@ pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !vo
     const shmPool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shmPool.destroy();
     const wlBuffer = try shmPool.createBuffer(0, @intCast(width), @intCast(height), @intCast(stride), .argb8888);
-    output.current_mmap = null; //todo
+    output.current_mmap = null;
     defer wlBuffer.destroy();
-    // const poolbuffer = animated_image.framebuffers.items[animated_image.current_frame];
     const surface = output.wlSurface orelse return;
-    // _ = poolbuffer;
     surface.attach(wlBuffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.height));
     surface.commit();

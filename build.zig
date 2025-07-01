@@ -78,14 +78,17 @@ pub fn build(b: *std.Build) void {
     yin_daemon.root_module.addImport("shared", shared);
     yin_client.root_module.addImport("shared", shared);
 
-    const lz4 = b.addTranslateC(.{
-        .root_source_file = b.path("vendor/lz4.h"),
-        .optimize = optimize,
-        .target = target,
-    });
+    const lz4 = b.addTranslateC(.{ .root_source_file = b.addWriteFiles().add("./lz4.h",
+        \\ #include <lz4.h>
+    ), .optimize = optimize, .target = target, .link_libc = true });
 
     const ffmpeg = b.addTranslateC(.{
-        .root_source_file = b.path("vendor/ffmpeg.h"),
+        .root_source_file = b.addWriteFiles().add("./ffmpeg.h",
+            \\  #include <libavformat/avformat.h>
+            \\  #include <libavcodec/avcodec.h>
+            \\  #include <libswscale/swscale.h>
+            \\  #include <libavutil/imgutils.h>
+        ),
         .target = target,
         .optimize = optimize,
     });
@@ -94,7 +97,6 @@ pub fn build(b: *std.Build) void {
     yin_client.linkSystemLibrary("lz4");
     yin_client.root_module.addImport("stb", stb.createModule());
     yin_daemon.linkSystemLibrary("lz4");
-    yin_client.linkSystemLibrary("MagickWand-7.Q16HDRI");
     yin_client.linkSystemLibrary("libswscale");
     yin_client.linkSystemLibrary("avformat");
     yin_client.linkSystemLibrary("avcodec");

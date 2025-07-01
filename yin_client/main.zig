@@ -1,4 +1,4 @@
-pub const std_options: std.Options= .{ .log_level = .info };
+pub const std_options: std.Options = .{ .log_level = .info };
 const std = @import("std");
 const flags = @import("flags");
 const stb = @import("stb");
@@ -19,6 +19,7 @@ const Arguments = struct {
     transition: Transition = .BottomTop,
     output: ?[]u8 = null,
 };
+
 fn parse_args() !Arguments {
     const argv = std.os.argv;
     var args: Arguments = .{};
@@ -172,7 +173,9 @@ fn send_set_image(
         error.BrokenPipe => return, // Expected when server closes
         else => return err,
     };
-    std.log.info("{s}", .{response[0..bytes_read]});
+    if (bytes_read != 0) {
+        std.log.info("{s}", .{response[0..bytes_read]});
+    }
 }
 
 fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
