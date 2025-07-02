@@ -100,10 +100,21 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
     const height = try fbs.reader().readInt(u32, .little);
     const width = try fbs.reader().readInt(u32, .little);
     const stride = try fbs.reader().readInt(u8, .little);
+
     //Go through frames
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
     var frame_fds = try allocator.alloc(std.posix.fd_t, number_of_frames);
     for (0..number_of_frames) |i| {
+        const full_or_composite = try fbs.reader().readByte();
+        if (full_or_composite == 0) {
+            try composite_from_delta(
+                &fbs,
+                durations,
+                i,
+            );
+            continue;
+        }
+
         const duration_length = try fbs.reader().readInt(u32, .little);
         const duration_buffer = try allocator.alloc(u8, duration_length);
         defer allocator.free(duration_buffer);
@@ -186,6 +197,37 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         .frame_fds = frame_fds,
         .timer_fd = timer_fd,
     } } };
+}
+
+fn composite_from_delta(
+    fbs: *std.io.FixedBufferStream([]u8),
+    durations: []f32,
+    i: usize,
+) !void {
+    const duration_length = try fbs.reader().readInt(u32, .little);
+    const duration_buffer = try allocator.alloc(u8, duration_length);
+    defer allocator.free(duration_buffer);
+    _ = try fbs.reader().readAll(duration_buffer);
+    const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
+    durations[i] = duration;
+
+    //read compressed length
+    const original_len = try fbs.reader().readInt(u32, .little);
+    const compressed_len = try fbs.reader().readInt(u32, .little);
+    const compressed_buffer = try allocator.alloc(u8, compressed_len);
+    defer allocator.free(compressed_buffer);
+    _ = try fbs.reader().readAll(compressed_buffer);
+    const decompressed_buffer = try allocator.alloc(u8, original_len);
+    defer allocator.free(decompressed_buffer);
+    const decompressed_size = lz4.LZ4_decompress_safe(
+        @ptrCast(@alignCast(compressed_buffer.ptr)),
+        @ptrCast(@alignCast(decompressed_buffer.ptr)),
+        @intCast(compressed_buffer.len),
+        @intCast(decompressed_buffer.len),
+    );
+    //this is the delta
+    const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
+    _ = decompressed_data_slice;
 }
 
 pub fn deinit(image: *Image) void {
