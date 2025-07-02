@@ -136,6 +136,7 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             @ptrCast(@alignCast(decompressed_data.ptr)),
             @intCast(stride * width),
         );
+        defer _ = src_img.?.unref();
         var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
         //write image directly to shm
         const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
