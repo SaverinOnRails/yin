@@ -207,7 +207,10 @@ fn iter(
     //write data
     try file.writer().writeAll(compressed_buffer[0..@intCast(compressed_size)]);
 }
-
+const Segment = enum(u8) {
+    Equal = 0xE0,
+    Diff = 0xD0,
+};
 //delta encoding adapted from swww
 fn iter_delta(
     buffer: []u32,
@@ -231,35 +234,30 @@ fn iter_delta(
     try fixed_buffer.resize(buffer.len * 4); //massive chunk that is sure to fit
     var fbs = std.io.fixedBufferStream(fixed_buffer.items);
     var i: usize = 0;
+    var tag_count: usize = 0;
     while (i < buffer.len) {
         const equals = count_equals(buffer, prev_buffer, i);
         i += equals;
-
-        if (i >= buffer.len) break;
-        // std.log.info("equals is {d}", .{equals});
-        const diffs = count_difference(buffer, prev_buffer, i);
+        const diffs = if (i < buffer.len) count_difference(buffer, prev_buffer, i) else 0;
         i += diffs;
 
         //emit equals
-        var eqs_rem = equals;
-        while (eqs_rem >= 255) : (eqs_rem -= 255) {
-            try fbs.writer().writeByte(255); //write a byte
+        if (equals > 0) {
+            try fbs.writer().writeByte(0xE0);
+            try fbs.writer().writeInt(u32, @intCast(equals), .little); 
+            tag_count += 1;
         }
-        //if any left
-        if (eqs_rem > 0) try fbs.writer().writeByte(@intCast(eqs_rem));
-        try fbs.writer().writeByte(0); // Delimiter
 
         //emit changes
-        var rem_diff = diffs;
-        while (rem_diff >= 255) : (rem_diff -= 255) {
-            try fbs.writer().writeByte(255);
+        if (diffs > 0) {
+            try fbs.writer().writeByte(0xD0);
+            try fbs.writer().writeInt(u32, @intCast(diffs), .little); 
+            const pixel_bytes = std.mem.sliceAsBytes(buffer[(i - diffs)..i]);
+            try fbs.writer().writeAll(pixel_bytes);
+            tag_count += 1;
         }
-        if (rem_diff > 0) try fbs.writer().writeByte(@intCast(rem_diff));
-        const pixel_bytes = std.mem.sliceAsBytes(buffer[(i - diffs)..i]);
-        try fbs.writer().writeAll(pixel_bytes);
-        try fbs.writer().writeByte(0); // Delimiter
     }
-    //deflate
+    std.log.info("tagcount {d}", .{tag_count});
     try fixed_buffer.resize(fbs.pos);
     //write original length
     try file.writer().writeInt(u32, @intCast(fixed_buffer.items.len), .little);

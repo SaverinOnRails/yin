@@ -89,7 +89,7 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
         file.handle,
         0,
     );
-    defer std.posix.munmap(file_mapped_memory);
+    // defer std.posix.munmap(file_mapped_memory);
     const actual_data = file_mapped_memory[current_pos..];
     var fbs = std.io.fixedBufferStream(actual_data);
     defer {
@@ -104,14 +104,15 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
     //Go through frames
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
     var frame_fds = try allocator.alloc(std.posix.fd_t, number_of_frames);
+    var mmaps = try allocator.alloc([]align(4096) u8, number_of_frames);
     for (0..number_of_frames) |i| {
         const full_or_composite = try fbs.reader().readByte();
         if (full_or_composite == 0) {
-            try composite_from_delta(
-                &fbs,
-                durations,
-                i,
-            );
+            composite_from_delta(&fbs, durations, mmaps, frame_fds, i, output_height, output_width, output_stride, output_scale) catch {
+                if (@errorReturnTrace()) |trace| {
+                    std.debug.dumpStackTrace(trace.*);
+                }
+            };
             continue;
         }
 
@@ -161,7 +162,8 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
             fd,
             0,
         );
-        defer std.posix.munmap(data);
+        mmaps[i] = data;
+        // defer std.posix.munmap(data);
         const target_pixman = pixman.Image.createBits(
             .a8r8g8b8,
             @intCast(output_width),
@@ -202,7 +204,13 @@ pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse 
 fn composite_from_delta(
     fbs: *std.io.FixedBufferStream([]u8),
     durations: []f32,
+    mmaps: [][]align(4096) u8,
+    frame_fds: []std.posix.fd_t,
     i: usize,
+    height: u32,
+    width: u32,
+    stride: u32,
+    scale: u32,
 ) !void {
     const duration_length = try fbs.reader().readInt(u32, .little);
     const duration_buffer = try allocator.alloc(u8, duration_length);
@@ -225,9 +233,88 @@ fn composite_from_delta(
         @intCast(compressed_buffer.len),
         @intCast(decompressed_buffer.len),
     );
-    //this is the delta
-    const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
-    _ = decompressed_data_slice;
+
+    const prev_data = @as([*]u32, @ptrCast(mmaps[i - 1].ptr))[0 .. width * height];
+    _ = prev_data;
+    const encoded: []u8 = decompressed_buffer[0..@intCast(decompressed_size)];
+    //decode
+    var efba = std.io.fixedBufferStream(encoded);
+    //obtain tag
+    const current_data = try allocator.alloc(u32, height * width);
+    defer allocator.free(current_data);
+    var output_pos: usize = 0;
+    std.log.info("free", .{});
+    while (true) {
+        if (try efba.getPos() == try efba.getEndPos()) break;
+        const tag = try efba.reader().readByte();
+        if (tag != 0xE0 and tag != 0xD0) return error.InvalidTag;
+        if (tag == 0xE0) { 
+            const unchanged_count = try efba.reader().readInt(u32, .little);
+            // @memcpy(current_data[output_pos .. unchanged_count + output_pos], prev_data[output_pos .. output_pos + unchanged_count]);
+            output_pos += unchanged_count;
+        } else if (tag == 0xD0) {
+            const changed_len = try efba.reader().readInt(u32, .little);
+            const bytes_to_read = changed_len * @sizeOf(u32);
+            const read_pos = try efba.getPos();
+            const pixel_data = std.mem.bytesAsSlice(u32, encoded[read_pos .. read_pos + bytes_to_read]);
+            @memcpy(current_data[output_pos .. output_pos + changed_len], pixel_data);
+            try efba.seekTo(read_pos + bytes_to_read);
+            output_pos += changed_len;
+        }
+    }
+    //pixman stuff,
+    var pixel_data = std.ArrayList(u32).init(allocator);
+    defer pixel_data.deinit();
+    const src_img = pixman.Image.createBits(
+        .a8r8g8b8,
+        @intCast(width),
+        @intCast(height),
+        @ptrCast(@alignCast(current_data.ptr)),
+        @intCast(4 * width),
+    );
+    var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
+    //write image directly to shm
+    const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
+    //defer std.posix.close(fd);
+    const size = width * stride;
+    try std.posix.ftruncate(fd, @intCast(size));
+    const data = try std.posix.mmap(
+        null,
+        size,
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .TYPE = .SHARED },
+        fd,
+        0,
+    );
+    mmaps[i] = data;
+    // defer std.posix.munmap(data);
+    const target_pixman = pixman.Image.createBits(
+        .a8r8g8b8,
+        @intCast(width),
+        @intCast(height),
+        @ptrCast(@alignCast(data.ptr)),
+        @intCast(stride),
+    );
+    src.Scale(
+        width * @as(u32, @intCast(scale)),
+        height * @as(u32, @intCast(scale)),
+        1,
+    );
+    pixman.Image.composite32(
+        .src,
+        src_img.?,
+        null,
+        target_pixman.?,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        @intCast(width * @as(u32, @intCast(scale))),
+        @intCast(height * @as(u32, @intCast(scale))),
+    );
+    frame_fds[i] = fd;
 }
 
 pub fn deinit(image: *Image) void {
