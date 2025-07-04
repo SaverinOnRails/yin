@@ -234,7 +234,6 @@ fn iter_delta(
     try fixed_buffer.resize(buffer.len * 4); //massive chunk that is sure to fit
     var fbs = std.io.fixedBufferStream(fixed_buffer.items);
     var i: usize = 0;
-    var tag_count: usize = 0;
     while (i < buffer.len) {
         const equals = count_equals(buffer, prev_buffer, i);
         i += equals;
@@ -245,7 +244,6 @@ fn iter_delta(
         if (equals > 0) {
             try fbs.writer().writeByte(0xE0);
             try fbs.writer().writeInt(u32, @intCast(equals), .little); 
-            tag_count += 1;
         }
 
         //emit changes
@@ -254,10 +252,8 @@ fn iter_delta(
             try fbs.writer().writeInt(u32, @intCast(diffs), .little); 
             const pixel_bytes = std.mem.sliceAsBytes(buffer[(i - diffs)..i]);
             try fbs.writer().writeAll(pixel_bytes);
-            tag_count += 1;
         }
     }
-    std.log.info("tagcount {d}", .{tag_count});
     try fixed_buffer.resize(fbs.pos);
     //write original length
     try file.writer().writeInt(u32, @intCast(fixed_buffer.items.len), .little);
