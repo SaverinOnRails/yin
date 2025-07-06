@@ -229,10 +229,8 @@ fn iter_delta(
     std.debug.assert(buffer.len == prev_buffer.len);
 
     //Run length encoding to obtain changed pixels
-    var fixed_buffer = std.ArrayList(u8).init(allocator);
-    defer fixed_buffer.deinit();
-    try fixed_buffer.resize(buffer.len * 4); //massive chunk that is sure to fit
-    var fbs = std.io.fixedBufferStream(fixed_buffer.items);
+    var fbs = std.ArrayList(u8).init(allocator);
+    defer fbs.deinit();
     var i: usize = 0;
     while (i < buffer.len) {
         const equals = count_equals(buffer, prev_buffer, i);
@@ -243,26 +241,25 @@ fn iter_delta(
         //emit equals
         if (equals > 0) {
             try fbs.writer().writeByte(0xE0);
-            try fbs.writer().writeInt(u32, @intCast(equals), .little); 
+            try fbs.writer().writeInt(u32, @intCast(equals), .little);
         }
 
         //emit changes
         if (diffs > 0) {
             try fbs.writer().writeByte(0xD0);
-            try fbs.writer().writeInt(u32, @intCast(diffs), .little); 
+            try fbs.writer().writeInt(u32, @intCast(diffs), .little);
             const pixel_bytes = std.mem.sliceAsBytes(buffer[(i - diffs)..i]);
             try fbs.writer().writeAll(pixel_bytes);
         }
     }
-    try fixed_buffer.resize(fbs.pos);
     //write original length
-    try file.writer().writeInt(u32, @intCast(fixed_buffer.items.len), .little);
-    const max_compressed_size = lz4.LZ4_compressBound(@intCast(fixed_buffer.items.len));
+    try file.writer().writeInt(u32, @intCast(fbs.items.len), .little);
+    const max_compressed_size = lz4.LZ4_compressBound(@intCast(fbs.items.len));
     const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
     const compressed_size = lz4.LZ4_compress_default(
-        @ptrCast(@alignCast(fixed_buffer.items.ptr)),
+        @ptrCast(@alignCast(fbs.items.ptr)),
         @ptrCast(@alignCast(compressed_buffer.ptr)),
-        @intCast(fixed_buffer.items.len),
+        @intCast(fbs.items.len),
         @intCast(max_compressed_size),
     );
     //write compressed len
