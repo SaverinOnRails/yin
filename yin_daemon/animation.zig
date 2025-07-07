@@ -18,35 +18,33 @@ base_frame: []align(4096) u8,
 timer_fd: posix.fd_t,
 event_index: usize = 1,
 output_name: u32 = 0,
-poolBuffer: *Buffer.PoolBuffer,
+poolBuffer: *Buffer.PoolBuffer, //todo, should not be a pool buffer on animation
 
+pub fn deinit(self: *AnimatedImage) void {
+    allocator.free(self.durations);
+    for (self.delta_mmaps, 0..) |dm, i| {
+        //first item in this array is invald
+        if (i == 0) continue;
+        std.posix.munmap(dm);
+    }
+    allocator.free(self.delta_mmaps);
+    std.posix.munmap(self.base_frame);
+    self.poolBuffer.deinit();
+}
 pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
     const output_scale: u32 = @intCast(output.scale);
     const output_height = output.height * output_scale;
     const output_width = output.width * output_scale;
     const output_stride = output_width * 4;
-
-    const current_pos = try file.getPos();
-    const file_size = try file.getEndPos();
-    const file_mapped_memory = try std.posix.mmap(
-        null,
-        file_size,
-        std.posix.PROT.READ,
-        .{ .TYPE = .SHARED },
-        file.handle,
-        0,
-    );
-    defer std.posix.munmap(file_mapped_memory);
-    const actual_data = file_mapped_memory[current_pos..];
-    var fbs = std.io.fixedBufferStream(actual_data);
+    var fbs = file;
     defer {
         file.close();
         allocator.destroy(file);
     }
     const number_of_frames = try fbs.reader().readInt(u32, .little);
-    const height = try fbs.reader().readInt(u32, .little);
-    const width = try fbs.reader().readInt(u32, .little);
-    const stride = try fbs.reader().readInt(u8, .little);
+    _ = try fbs.reader().readInt(u32, .little);
+    _ = try fbs.reader().readInt(u32, .little);
+    _ = try fbs.reader().readInt(u8, .little);
 
     //Go through frames
     var durations: []f32 = try allocator.alloc(f32, number_of_frames);
@@ -57,7 +55,7 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
         const full_or_composite = try fbs.reader().readByte();
         if (full_or_composite == 0) {
             composite_from_delta(
-                &fbs,
+                fbs,
                 durations,
                 delta_mmaps,
                 i,
@@ -89,22 +87,7 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
             @intCast(decompressed_buffer.len),
         );
         const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
-        const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
-
-        //only because image struct needs this, todo: fix this
-        var pixel_data = std.ArrayList(u32).init(allocator);
-        defer pixel_data.deinit();
-        const src_img = pixman.Image.createBits(
-            .a8r8g8b8,
-            @intCast(width),
-            @intCast(height),
-            @ptrCast(@alignCast(decompressed_data.ptr)),
-            @intCast(stride * width),
-        );
-        var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
-        //write image directly to shm
         const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
-        //defer std.posix.close(fd);
         const size = output_height * output_stride;
         try std.posix.ftruncate(fd, @intCast(size));
         const data = try std.posix.mmap(
@@ -115,34 +98,10 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
             fd,
             0,
         );
-        // defer std.posix.munmap(data);
         base_frame = data;
-        const target_pixman = pixman.Image.createBits(
-            .a8r8g8b8,
-            @intCast(output_width),
-            @intCast(output_height),
-            @ptrCast(@alignCast(data.ptr)),
-            @intCast(output_stride),
-        );
-        src.Scale(
-            output.width * @as(u32, @intCast(output.scale)),
-            output.height * @as(u32, @intCast(output.scale)),
-            1,
-        );
-        pixman.Image.composite32(
-            .src,
-            src_img.?,
-            null,
-            target_pixman.?,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            @intCast(output.width * @as(u32, @intCast(output.scale))),
-            @intCast(output.height * @as(u32, @intCast(output.scale))),
-        );
+        //must be the same resolution, todo: this is really stupid
+        if (data.len != decompressed_data_slice.len) return error.IncorrectDimension;
+        @memcpy(data, decompressed_data_slice);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
     return ImageResponse{ .Animated = .{ .image = .{
@@ -156,7 +115,7 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
 }
 
 fn composite_from_delta(
-    fbs: *std.io.FixedBufferStream([]u8),
+    fbs: *std.fs.File,
     durations: []f32,
     mmaps: [][]align(4096) u8,
     i: usize,
@@ -183,11 +142,7 @@ fn composite_from_delta(
         @intCast(decompressed_buffer.len),
     );
 
-    // const prev_data = @as([*]u32, @ptrCast(mmaps[i - 1].ptr))[0 .. width * height];
     const encoded: []u8 = decompressed_buffer[0..@intCast(decompressed_size)];
-    //decode
-    // var efba = std.io.fixedBufferStream(encoded);
-    // var output_pos: usize = 0;
     const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
     defer std.posix.close(fd);
     try std.posix.ftruncate(fd, @intCast(encoded.len));
@@ -201,33 +156,6 @@ fn composite_from_delta(
     );
     @memcpy(data, encoded);
     mmaps[i] = data;
-    // _ = mmaps;
-    // const current_data = @as([*]u32, @ptrCast(data.ptr))[0 .. width * height];
-    // while (true) {
-    //     if (try efba.getPos() == try efba.getEndPos()) break;
-    //     const tag = try efba.reader().readByte();
-    //     if (tag != 0xE0 and tag != 0xD0) return error.InvalidTag;
-    //     if (tag == 0xE0) {
-    //         const unchanged_count = try efba.reader().readInt(u32, .little);
-    //         @memcpy(
-    //             data[output_pos * @sizeOf(u32) .. (output_pos + unchanged_count) * @sizeOf(u32)],
-    //             mmaps[i - 1][output_pos * @sizeOf(u32) .. (output_pos + unchanged_count) * @sizeOf(u32)],
-    //         );
-    //         output_pos += unchanged_count;
-    //     } else if (tag == 0xD0) {
-    //         const changed_len = try efba.reader().readInt(u32, .little);
-    //         const bytes_to_read = changed_len * @sizeOf(u32);
-    //         const read_pos = try efba.getPos();
-    //         const pixel_data = std.mem.bytesAsSlice(u32, encoded[read_pos .. read_pos + bytes_to_read]);
-    //         @memcpy(current_data[output_pos .. output_pos + changed_len], pixel_data);
-    //         try efba.seekTo(read_pos + bytes_to_read);
-    //         output_pos += changed_len;
-    //     }
-    // }
-}
-pub fn deinit(self: *AnimatedImage) void {
-    allocator.free(self.durations);
-    // allocator.destroy(self); //check why this fails
 }
 
 pub fn set_timer_milliseconds(_: AnimatedImage, timer_fd: posix.fd_t, duration: f32) !void {
@@ -276,7 +204,16 @@ pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
                     const bytes_to_read = changed_len * pixel_size;
                     const pixel_data = delta_data[index .. index + bytes_to_read];
                     index += bytes_to_read;
-                    @memcpy(data[output_pos * pixel_size .. (output_pos + changed_len) * pixel_size], pixel_data);
+                    const start_at = output_pos * pixel_size;
+                    var i: usize = 0;
+                    const chunk_size: u8 = 128;
+                    while (i + chunk_size < bytes_to_read) {
+                        @memcpy(data[start_at + i .. start_at + i + chunk_size], pixel_data[i .. i + chunk_size]);
+                        i += chunk_size;
+                    }
+                    if (i < bytes_to_read) {
+                        @memcpy(data[start_at + i .. bytes_to_read + start_at], pixel_data[i..]);
+                    }
                     output_pos += changed_len;
                 }
             }
