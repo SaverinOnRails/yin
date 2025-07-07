@@ -11,7 +11,7 @@ pub const Image = @This();
 src: *pixman.Image,
 pixel_data: std.ArrayList(u32),
 
-const ImageResponse = union(enum) {
+pub const ImageResponse = union(enum) {
     Static: struct {
         image: *Image,
     },
@@ -30,7 +30,7 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     const _br = try file.reader().readAll(_buffer);
 
     if (std.mem.order(u8, _buffer[0.._br], "animated") == .eq) {
-        return load_animated_image(file, output);
+        return animation.load(file, output);
     } else if (std.mem.order(u8, _buffer[0.._br], "static") != .eq) {
         //unknown, possibly corrupted.
         return null;
@@ -73,121 +73,6 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     return ImageResponse{ .Static = .{ .image = src } };
 }
 
-pub fn load_animated_image(file: *std.fs.File, output: *Output) !?ImageResponse {
-    const output_scale: u32 = @intCast(output.scale);
-    const output_height = output.height * output_scale;
-    const output_width = output.width * output_scale;
-    const output_stride = output_width * 4;
-
-    const current_pos = try file.getPos();
-    const file_size = try file.getEndPos();
-    const file_mapped_memory = try std.posix.mmap(
-        null,
-        file_size,
-        std.posix.PROT.READ,
-        .{ .TYPE = .SHARED },
-        file.handle,
-        0,
-    );
-    defer std.posix.munmap(file_mapped_memory);
-    const actual_data = file_mapped_memory[current_pos..];
-    var fbs = std.io.fixedBufferStream(actual_data);
-    defer {
-        file.close();
-        allocator.destroy(file);
-    }
-    const number_of_frames = try fbs.reader().readInt(u32, .little);
-    const height = try fbs.reader().readInt(u32, .little);
-    const width = try fbs.reader().readInt(u32, .little);
-    const stride = try fbs.reader().readInt(u8, .little);
-    //Go through frames
-    var durations: []f32 = try allocator.alloc(f32, number_of_frames);
-    var frame_fds = try allocator.alloc(std.posix.fd_t, number_of_frames);
-    for (0..number_of_frames) |i| {
-        const duration_length = try fbs.reader().readInt(u32, .little);
-        const duration_buffer = try allocator.alloc(u8, duration_length);
-        defer allocator.free(duration_buffer);
-        _ = try fbs.reader().readAll(duration_buffer);
-        const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
-        durations[i] = duration;
-        const original_pixel_len = try fbs.reader().readInt(u32, .little);
-        const compressed_pixel_len = try fbs.reader().readInt(u32, .little);
-        const compressed_buffer = try allocator.alloc(u8, compressed_pixel_len);
-        defer allocator.free(compressed_buffer);
-        _ = try fbs.reader().readAll(compressed_buffer);
-        const decompressed_buffer = try allocator.alloc(u8, original_pixel_len * @sizeOf(u32));
-        defer allocator.free(decompressed_buffer);
-        const decompressed_size = lz4.LZ4_decompress_safe(
-            @ptrCast(@alignCast(compressed_buffer.ptr)),
-            @ptrCast(@alignCast(decompressed_buffer.ptr)),
-            @intCast(compressed_buffer.len),
-            @intCast(decompressed_buffer.len),
-        );
-        const decompressed_data_slice = decompressed_buffer[0..@intCast(decompressed_size)];
-        const decompressed_data = std.mem.bytesAsSlice(u32, decompressed_data_slice);
-
-        //only because image struct needs this, todo: fix this
-        var pixel_data = std.ArrayList(u32).init(allocator);
-        defer pixel_data.deinit();
-        const src_img = pixman.Image.createBits(
-            .a8r8g8b8,
-            @intCast(width),
-            @intCast(height),
-            @ptrCast(@alignCast(decompressed_data.ptr)),
-            @intCast(stride * width),
-        );
-        defer _ = src_img.?.unref();
-        var src: Image = .{ .src = src_img.?, .pixel_data = pixel_data };
-        //write image directly to shm
-        const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
-        //defer std.posix.close(fd);
-        const size = output_width * output_stride;
-        try std.posix.ftruncate(fd, @intCast(size));
-        const data = try std.posix.mmap(
-            null,
-            size,
-            std.posix.PROT.READ | std.posix.PROT.WRITE,
-            .{ .TYPE = .SHARED },
-            fd,
-            0,
-        );
-        defer std.posix.munmap(data);
-        const target_pixman = pixman.Image.createBits(
-            .a8r8g8b8,
-            @intCast(output_width),
-            @intCast(output_height),
-            @ptrCast(@alignCast(data.ptr)),
-            @intCast(output_stride),
-        );
-        src.Scale(
-            output.width * @as(u32, @intCast(output.scale)),
-            output.height * @as(u32, @intCast(output.scale)),
-            1,
-        );
-        pixman.Image.composite32(
-            .src,
-            src_img.?,
-            null,
-            target_pixman.?,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            @intCast(output.width * @as(u32, @intCast(output.scale))),
-            @intCast(output.height * @as(u32, @intCast(output.scale))),
-        );
-        frame_fds[i] = fd;
-    }
-    const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
-    return ImageResponse{ .Animated = .{ .image = .{
-        .durations = durations,
-        .framecount = number_of_frames,
-        .frame_fds = frame_fds,
-        .timer_fd = timer_fd,
-    } } };
-}
 
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
