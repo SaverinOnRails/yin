@@ -188,7 +188,6 @@ fn iter(
 
     const pixel_data = buffer;
     const len = pixel_data.len;
-    std.log.info("len is {d}", .{len});
     //write original length of pixel data
     try file.writer().writeInt(u32, @intCast(len), .little);
     //compress this frame, i should really stop repeating this code

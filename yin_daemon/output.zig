@@ -24,6 +24,13 @@ needs_reload: bool = false,
 identifier: ?[]u8 = null,
 configured: bool = false,
 zwlrLayerSurface: ?*zwlr.LayerSurfaceV1 = null,
+pub fn deinit(output: *Output) void {
+    //destroy globals
+    output.wlSurface.?.destroy();
+    output.wlOutput.destroy();
+    output.zwlrLayerSurface.?.destroy();
+    if (output.identifier) |id| allocator.free(id);
+}
 pub fn setListener(output: *Output) !void {
     output.wlOutput.setListener(*Output, output_listener, output);
 }
@@ -42,15 +49,11 @@ fn output_listener(_: *wl.Output, event: wl.Output.Event, output: *Output) void 
             output.height = @intCast(_m.height);
             output.width = @intCast(_m.width);
         },
-        .name => {},
-        .description => |desc| {
-            //as per sway, this might break on compositors not wlroots compatible
-            const desc_span = std.mem.span(desc.description);
-            const start = std.mem.indexOf(u8, desc_span, "(") orelse return; //no exist
-            const end = std.mem.indexOf(u8, desc_span, ")") orelse return;
-            if (start > end) return;
-            const output_name = desc_span[start + 1 .. end];
-            output.identifier = allocator.dupe(u8, output_name) catch return;
+        .name => |_s| {
+            output.identifier = allocator.dupe(u8, std.mem.span(_s.name)) catch return; //out of memory
+        },
+        .description => {
+            //don't care anymore
         },
     }
 }
@@ -243,39 +246,3 @@ fn write_image_path_to_cache(output: *Output, path: []u8) !void {
     try file.writer().writeAll(path);
 }
 
-pub fn deinit(output: *Output) void {
-    //destroy globals
-    output.wlSurface.?.destroy();
-    output.wlOutput.destroy();
-    output.zwlrLayerSurface.?.destroy();
-    if (output.identifier) |id| allocator.free(id);
-}
-
-// pub fn play_animation_frame(output: *Output, animated_image: *AnimatedImage) !void {
-//     const scale: u32 = @intCast(output.scale);
-//     const height = output.height * scale;
-//     const width = output.width * scale;
-//     const stride = width * 4;
-//     _ = stride;
-//     _ = animated_image;
-//     _ = height;
-//     // const fd = animated_image.frame_fds[animated_image.current_frame];
-//     // const size = height * stride;
-//     // const shmPool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
-//     // defer shmPool.destroy();
-//     // const wlBuffer = try shmPool.createBuffer(0, @intCast(width), @intCast(height), @intCast(stride), .argb8888);
-//     // output.current_mmap = null;
-//     // defer wlBuffer.destroy();
-//     // const surface = output.wlSurface orelse return;
-//     // surface.attach(wlBuffer, 0, 0);
-//     // surface.damage(0, 0, @intCast(output.width), @intCast(output.height));
-//     // surface.commit();
-//     // if (animated_image.current_frame + 1 >= animated_image.framecount) {
-//     //     animated_image.current_frame = 1;
-//     // } else {
-//     //     animated_image.current_frame += 1;
-//     // }
-//     // //schedule next frame
-//     // if (output.paused == true) return;
-//     // try animated_image.set_timer_milliseconds(animated_image.timer_fd, animated_image.durations[animated_image.current_frame]);
-// }
