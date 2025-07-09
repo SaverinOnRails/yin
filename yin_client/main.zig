@@ -15,7 +15,7 @@ const Arguments = struct {
     restore: ?bool = null,
     pause: ?bool = null,
     play: ?bool = null,
-    downsize: ?bool = true,
+    downsize: bool = true,
     transition: Transition = .BottomTop,
     output: ?[]u8 = null,
 };
@@ -80,21 +80,15 @@ pub fn main() !void {
         std.posix.exit(1);
     };
     if (args.img) |img| {
-        try send_set_image(
-            img,
-            &stream,
-            args.downsize.?,
-            args.transition,
-            args.output,
-        );
+        try send_set_image(img, &stream, args);
     } else if (args.color) |color| {
-        try send_hex_code(color, &stream);
+        try send_hex_code(color, &stream, args);
     } else if (args.restore) |restore| {
-        if (restore) try send_restore(&stream);
+        if (restore) try send_restore(&stream, args);
     } else if (args.pause) |_| {
-        try send_toggle_play(false, &stream);
+        try send_toggle_play(false, &stream, args);
     } else if (args.play) |_| {
-        try send_toggle_play(true, &stream);
+        try send_toggle_play(true, &stream, args);
     } else {
         print_help();
     }
@@ -102,13 +96,19 @@ pub fn main() !void {
     std.log.info("Request sent to Daemon", .{});
 }
 
-//todo: this should take an output identifier
-fn get_monitor_dimensions(stream: *const std.net.Stream) !shared.MonitorSize {
-    const msg: shared.Message = shared.Message.MonitorSize;
+fn get_monitor_dimensions(
+    stream: *const std.net.Stream,
+    output: ?[]u8,
+) !shared.MonitorSize {
+    const msg: shared.Message = shared.Message{
+        .payload = .MonitorSize,
+        .output = output,
+    };
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
+
     //read reply
     var buf: [100]u8 = undefined;
     const bytes_read = try stream.read(&buf);
@@ -142,9 +142,7 @@ fn print_help() void {
 fn send_set_image(
     path: []u8,
     stream: *const std.net.Stream,
-    downsize: bool,
-    transition: shared.Transition,
-    output: ?[]u8,
+    args: Arguments,
 ) !void {
     //check if a cache file fot this exists
     const safe_name = try sanitizeForFilename(path);
@@ -152,14 +150,19 @@ fn send_set_image(
     var cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin", safe_name });
     defer allocator.free(cache_file_path);
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
-        //any error here likely means it could not open the file, cache then
-        cache_file_path = try cache_image(path, downsize, stream);
+        cache_file_path = try cache_image(
+            path,
+            stream,
+            args,
+        );
     };
     const msg: shared.Message = .{
-        .Image = .{
-            .path = cache_file_path,
-            .transition = transition,
-            .output = output,
+        .output = args.output,
+        .payload = .{
+            .Image = .{
+                .path = cache_file_path,
+                .transition = args.transition,
+            },
         },
     };
     var buffer = std.ArrayList(u8).init(allocator);
@@ -178,9 +181,14 @@ fn send_set_image(
     }
 }
 
-fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
+fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream, args: Arguments) !void {
     const msg: shared.Message = .{
-        .Color = .{ .hexcode = hexcode },
+        .output = args.output,
+        .payload = .{
+            .Color = .{
+                .hexcode = hexcode,
+            },
+        },
     };
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
@@ -188,8 +196,11 @@ fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream) !void {
     _ = try stream.write(buffer.items);
 }
 
-fn send_restore(stream: *const std.net.Stream) !void {
-    const msg: shared.Message = shared.Message.Restore;
+fn send_restore(stream: *const std.net.Stream, args: Arguments) !void {
+    const msg: shared.Message = .{
+        .output = args.output,
+        .payload = .Restore,
+    };
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
@@ -204,12 +215,16 @@ fn send_restore(stream: *const std.net.Stream) !void {
 fn send_toggle_play(
     play: bool,
     stream: *const std.net.Stream,
+    args: Arguments,
 ) !void {
-    var msg: shared.Message = undefined;
+    var msg: shared.Message = .{
+        .output = args.output,
+        .payload = .Play,
+    };
     if (play == true) {
-        msg = shared.Message.Play;
+        msg.payload = .Play;
     } else {
-        msg = shared.Message.Pause;
+        msg.payload = .Pause;
     }
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
@@ -219,10 +234,10 @@ fn send_toggle_play(
 
 fn cache_image(
     path: []const u8,
-    downsize: bool,
     stream: *const std.net.Stream,
+    args: Arguments,
 ) ![]u8 {
-    const monitor_size = try get_monitor_dimensions(stream);
+    const monitor_size = try get_monitor_dimensions(stream, args.output);
     std.log.info("Requested monitor has dimensions {d}x{d}", .{ monitor_size.width, monitor_size.height });
     //create paths
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
@@ -240,7 +255,7 @@ fn cache_image(
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
     //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
     if (std.mem.endsWith(u8, path, ".gif") or std.mem.endsWith(u8, path, ".mp4")) {
-        try cache_animated_gif(path, &pixel_cache_file, downsize, monitor_size);
+        try cache_animated_gif(path, &pixel_cache_file, args.downsize, monitor_size);
         return pixel_cache_file_path;
     }
     std.log.info("Loading Image...", .{});
@@ -255,7 +270,7 @@ fn cache_image(
     const static = "static";
     var HEIGHT = image.height;
     var WIDTH = image.width;
-    if (downsize) {
+    if (args.downsize) {
         //only downsize if need be
         if (image.width > monitor_size.width or image.height > monitor_size.height) {
             std.log.info("Downsizing to  {d}x{d}", .{ monitor_size.width, monitor_size.height });

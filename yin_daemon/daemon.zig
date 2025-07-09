@@ -69,8 +69,9 @@ pub fn init() !void {
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
             daemon.handle_ipc_message(message, &conn) catch continue;
+
             //expect follow up message
-            if (message == .MonitorSize) {
+            if (message.payload == .MonitorSize) {
                 const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
                 daemon.handle_ipc_message(follow_up, &conn) catch continue;
             }
@@ -145,10 +146,7 @@ fn die(comptime format: []const u8) noreturn {
 
 fn configure(daemon: *Daemon, render_type: shared.Message, conn: *const std.net.Server.Connection) void {
     var it = daemon.Outputs.first;
-    const output_name = switch (render_type) {
-        .Image => |s| s.output,
-        else => null,
-    };
+    const output_name = render_type.output;
     var did_render: bool = false;
     //null means render on all outputs
     while (it) |node| : (it = node.next) {
@@ -183,11 +181,11 @@ fn toggle_play(daemon: *Daemon, play: bool) void {
     }
 }
 fn handle_ipc_message(daemon: *Daemon, message: shared.Message, conn: *const std.net.Server.Connection) !void {
-    switch (message) {
+    switch (message.payload) {
         .Image => |s| {
             daemon.configure(message, conn);
             allocator.free(s.path);
-            if (s.output) |out| allocator.free(out);
+            if (message.output) |out| allocator.free(out);
         },
         .Color => |c| {
             daemon.configure(message, conn);

@@ -9,20 +9,29 @@ const MessageTags = enum(u8) {
     MonitorSize,
 };
 
-pub const Message = union(MessageTags) {
-    Image: struct { path: []u8, transition: Transition, output: ?[]u8 },
-    Color: struct { hexcode: []u8 },
+pub const MessagePayload = union(MessageTags) {
+    Image: struct {
+        path: []u8,
+        transition: Transition,
+    },
+    Color: struct {
+        hexcode: []u8,
+    },
     Restore,
     Pause,
     Play,
     MonitorSize,
 };
 
+pub const Message = struct {
+    payload: MessagePayload,
+    output: ?[]u8,
+};
+
 pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !void {
     //write tag
-    try writer.writeInt(u8, @intFromEnum(message), .little);
-
-    switch (message) {
+    try writer.writeInt(u8, @intFromEnum(message.payload), .little);
+    switch (message.payload) {
         .Image => |s| {
             //write len
             try writer.writeInt(u32, @intCast(s.path.len), .little);
@@ -30,11 +39,11 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
             try writer.writeAll(s.path);
             //write transition
             try writer.writeInt(u8, @intFromEnum(s.transition), .little);
-            //write len of output_name
-            const output_name_len = if (s.output == null) 0 else s.output.?.len;
+            //write len of output_name, TODO: fix this
+            const output_name_len = if (message.output == null) 0 else message.output.?.len;
             try writer.writeInt(u8, @intCast(output_name_len), .little);
 
-            if (s.output) |out| {
+            if (message.output) |out| {
                 try writer.writeAll(out);
             }
         },
@@ -81,11 +90,15 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
                 const output_name_bytes_read = try reader.readAll(buffer);
                 output_name = try allocator.dupe(u8, buffer[0..output_name_bytes_read]);
             }
-            return Message{ .Image = .{
-                .path = path,
-                .transition = trans,
+            return Message{
                 .output = output_name,
-            } };
+                .payload = .{
+                    .Image = .{
+                        .path = path,
+                        .transition = trans,
+                    },
+                },
+            };
         },
         .Color => {
             const len = try reader.readInt(u32, .little);
@@ -93,23 +106,42 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
             defer allocator.free(buffer);
             const bytes_read = try reader.readAll(buffer);
             const hexcode = buffer[0..bytes_read];
-            return Message{ .Color = .{ .hexcode = try allocator.dupe(u8, hexcode) } };
+            return Message{
+                .output = null, //TODO
+                .payload = .{
+                    .Color = .{
+                        .hexcode = try allocator.dupe(u8, hexcode),
+                    },
+                },
+            };
         },
         .Restore => {
             //nothing to read
-            return Message.Restore;
+            return Message{
+                .output = null, //TODO
+                .payload = .Restore,
+            };
         },
         .Pause => {
             //nothing to read
-            return Message.Pause;
+            return Message{
+                .output = null, //TODO
+                .payload = .Pause,
+            };
         },
         .Play => {
             //nothing to read
-            return Message.Play;
+            return Message{
+                .output = null, //TODO
+                .payload = .Play,
+            };
         },
         .MonitorSize => {
             //nothing to read
-            return Message.MonitorSize;
+            return Message{
+                .output = null, //TODO
+                .payload = .MonitorSize,
+            };
         },
     }
 }

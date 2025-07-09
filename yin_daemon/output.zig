@@ -115,7 +115,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
         }
         it = next;
     }
-    switch (render_type) {
+    switch (render_type.payload) {
         .Image => |s| {
             try output.render_image(s.path, s.transition);
         },
@@ -245,4 +245,3 @@ fn write_image_path_to_cache(output: *Output, path: []u8) !void {
     defer file.close();
     try file.writer().writeAll(path);
 }
-
