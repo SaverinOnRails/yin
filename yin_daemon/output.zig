@@ -90,7 +90,7 @@ fn layer_surface_listener(_: *zwlr.LayerSurfaceV1, event: zwlr.LayerSurfaceV1.Ev
     }
 }
 
-pub fn render(output: *Output, render_type: shared.Message) !void {
+pub fn render(output: *Output, render_type: shared.MessagePayload) !void {
     if (output.configured == false) {
         std.log.err("Output not configured", .{});
         return;
@@ -115,7 +115,7 @@ pub fn render(output: *Output, render_type: shared.Message) !void {
         }
         it = next;
     }
-    switch (render_type.payload) {
+    switch (render_type) {
         .Image => |s| {
             try output.render_image(s.path, s.transition);
         },

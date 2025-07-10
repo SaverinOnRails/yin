@@ -39,13 +39,6 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
             try writer.writeAll(s.path);
             //write transition
             try writer.writeInt(u8, @intFromEnum(s.transition), .little);
-            //write len of output_name, TODO: fix this
-            const output_name_len = if (message.output == null) 0 else message.output.?.len;
-            try writer.writeInt(u8, @intCast(output_name_len), .little);
-
-            if (message.output) |out| {
-                try writer.writeAll(out);
-            }
         },
         .Color => |c| {
             //write size
@@ -66,12 +59,19 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
             //nothing to write
         },
     }
+    //write len of output_name
+    const output_name_len = if (message.output == null) 0 else message.output.?.len;
+    try writer.writeInt(u8, @intCast(output_name_len), .little);
+    if (message.output) |out| {
+        try writer.writeAll(out);
+    }
 }
 
 pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allocator) !Message {
     //read tag
     const tag = try reader.readInt(u8, .little);
     const msg: MessageTags = @enumFromInt(tag);
+    var message: Message = undefined;
     switch (msg) {
         .Image => {
             const len = try reader.readInt(u32, .little);
@@ -81,17 +81,8 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
             const path = try allocator.dupe(u8, buffer[0..bytes_read]);
             const trans_tag = try reader.readInt(u8, .little);
             const trans: Transition = @enumFromInt(trans_tag);
-
-            //read output name
-            var output_name: ?[]u8 = null;
-            const output_name_len = try reader.readInt(u8, .little);
-            if (output_name_len > 0) {
-                buffer = try allocator.realloc(buffer, output_name_len);
-                const output_name_bytes_read = try reader.readAll(buffer);
-                output_name = try allocator.dupe(u8, buffer[0..output_name_bytes_read]);
-            }
-            return Message{
-                .output = output_name,
+            message = Message{
+                .output = null,
                 .payload = .{
                     .Image = .{
                         .path = path,
@@ -106,7 +97,7 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
             defer allocator.free(buffer);
             const bytes_read = try reader.readAll(buffer);
             const hexcode = buffer[0..bytes_read];
-            return Message{
+            message = Message{
                 .output = null, //TODO
                 .payload = .{
                     .Color = .{
@@ -117,33 +108,43 @@ pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allo
         },
         .Restore => {
             //nothing to read
-            return Message{
+            message = Message{
                 .output = null, //TODO
                 .payload = .Restore,
             };
         },
         .Pause => {
             //nothing to read
-            return Message{
+            message = Message{
                 .output = null, //TODO
                 .payload = .Pause,
             };
         },
         .Play => {
             //nothing to read
-            return Message{
+            message = Message{
                 .output = null, //TODO
                 .payload = .Play,
             };
         },
         .MonitorSize => {
             //nothing to read
-            return Message{
+            message = Message{
                 .output = null, //TODO
                 .payload = .MonitorSize,
             };
         },
     }
+    //read output name
+    var output_name: ?[]u8 = null;
+    const output_name_len = try reader.readInt(u8, .little);
+    if (output_name_len > 0) {
+        const buffer = try allocator.alloc(u8, output_name_len);
+        const output_name_bytes_read = try reader.readAll(buffer);
+        output_name = try allocator.dupe(u8, buffer[0..output_name_bytes_read]);
+    }
+    message.output = output_name;
+    return message;
 }
 
 pub const MonitorSize = struct {

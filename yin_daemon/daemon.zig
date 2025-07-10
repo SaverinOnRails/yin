@@ -46,7 +46,7 @@ pub fn init() !void {
         .revents = 0,
     });
     const registry = try daemon.wlDisplay.getRegistry();
-    registry.setListener(*Daemon, registry_listener, &daemon);
+    registry.setListener(*Daemon, registryListener, &daemon);
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
     //ipc
     while (true) {
@@ -68,12 +68,12 @@ pub fn init() !void {
             const conn = try server.accept();
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
-            daemon.handle_ipc_message(message, &conn) catch continue;
+            daemon.handleIpcMessage(message, &conn) catch continue;
 
             //expect follow up message
             if (message.payload == .MonitorSize) {
                 const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
-                daemon.handle_ipc_message(follow_up, &conn) catch continue;
+                daemon.handleIpcMessage(follow_up, &conn) catch continue;
             }
         }
         //go through animations
@@ -92,10 +92,10 @@ pub fn init() !void {
     }
     _ = daemon.wlDisplay.flush();
 }
-fn registry_listener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
-    daemon.registry_event(registry, event) catch die("Error in registry");
+fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
+    daemon.registryEvent(registry, event) catch die("Error in registry");
 }
-fn registry_event(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Event) !void {
+fn registryEvent(daemon: *Daemon, registry: *wl.Registry, event: wl.Registry.Event) !void {
     switch (event) {
         .global => |ev| {
             //wl_compositor
@@ -144,72 +144,78 @@ fn die(comptime format: []const u8) noreturn {
     std.posix.exit(1);
 }
 
-fn configure(daemon: *Daemon, render_type: shared.Message, conn: *const std.net.Server.Connection) void {
-    var it = daemon.Outputs.first;
-    const output_name = render_type.output;
-    var did_render: bool = false;
-    //null means render on all outputs
-    while (it) |node| : (it = node.next) {
-        if (output_name) |out| {
-            if (!std.mem.eql(u8, out, node.data.identifier.?)) continue;
-        }
-        did_render = true;
-        node.data.render(render_type) catch return;
-    }
-    //could not find output
-    if (!did_render) {
-        const message = std.fmt.allocPrint(allocator, "Could not find output {s}", .{output_name.?}) catch return;
-        conn.stream.writeAll(message) catch return;
-    }
+fn configure(
+    _: *Daemon,
+    output: *Output,
+    render_type: shared.MessagePayload,
+) void {
+    output.render(render_type) catch return;
 }
 
-fn toggle_play(daemon: *Daemon, play: bool) void {
+fn togglePlay(daemon: *Daemon, output: *Output, play: bool) void {
     //do this on all outputs for now
-    var it = daemon.Outputs.first;
-    while (it) |node| : (it = node.next) {
-        node.data.paused = !play;
-        //resume the animation, there has to be a much better way to do this
-        if (!node.data.paused) {
-            const output_name = node.data.wayland_name;
-            var _it = daemon.animations.first;
-            while (_it) |_node| : (_it = _node.next) {
-                if (_node.data.output_name == output_name) {
-                    _node.data.play_frame(&node.data) catch return;
-                }
+    output.paused = !play;
+    //resume the animation, there has to be a much better way to do this
+    if (!output.paused) {
+        const output_name = output.wayland_name;
+        var it = daemon.animations.first;
+        while (it) |node| : (it = node.next) {
+            if (node.data.output_name == output_name) {
+                node.data.play_frame(output) catch return;
             }
         }
     }
 }
-fn handle_ipc_message(daemon: *Daemon, message: shared.Message, conn: *const std.net.Server.Connection) !void {
+fn handleIpcMessage(daemon: *Daemon, message: shared.Message, conn: *const std.net.Server.Connection) !void {
+    defer if (message.output) |out| allocator.free(out);
+    const requested_output = try daemon.getTargetMonitorFromName(&conn.stream, message.output);
     switch (message.payload) {
         .Image => |s| {
-            daemon.configure(message, conn);
+            daemon.configure(requested_output, message.payload);
             allocator.free(s.path);
-            if (message.output) |out| allocator.free(out);
         },
         .Color => |c| {
-            daemon.configure(message, conn);
+            daemon.configure(requested_output, message.payload);
             allocator.free(c.hexcode);
         },
         .Restore => {
-            daemon.configure(message, conn);
+            daemon.configure(
+                requested_output,
+                message.payload,
+            );
         },
         .Pause => {
-            daemon.toggle_play(false);
+            daemon.togglePlay(requested_output, false);
         },
         .Play => {
-            daemon.toggle_play(true);
+            daemon.togglePlay(requested_output, true);
         },
         .MonitorSize => {
             //return the dimensions of the requested output, TODO: should take an output identifier
             //first output for now
-            const output = daemon.Outputs.first.?.data;
-            if (!output.configured) return;
+            if (!requested_output.configured) return;
             var buffer: [100]u8 = undefined;
-            const dim = try std.fmt.bufPrint(&buffer, "{d}x{d}", .{ output.width, output.height });
+            const dim = try std.fmt.bufPrint(&buffer, "{d}x{d}", .{
+                requested_output.width,
+                requested_output.height,
+            });
             try conn.stream.writer().writeAll(dim);
         },
     }
+}
+
+fn getTargetMonitorFromName(daemon: *Daemon, stream: *const std.net.Stream, name: ?[]u8) !*Output {
+    if (name == null) {
+        return &daemon.Outputs.first.?.data;
+    }
+    const output_name = name.?;
+    var it = daemon.Outputs.first;
+    while (it) |node| : (it = node.next) {
+        if (std.mem.eql(u8, output_name, node.data.identifier.?)) return &node.data;
+    }
+    const message = std.fmt.allocPrint(allocator, "Could not find output {s}", .{output_name}) catch return error.NoOutput;
+    stream.writeAll(message) catch return error.NoOutput;
+    return error.NoOutput;
 }
 
 fn instanceRunning() bool {

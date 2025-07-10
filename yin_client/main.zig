@@ -20,7 +20,7 @@ const Arguments = struct {
     output: ?[]u8 = null,
 };
 
-fn parse_args() !Arguments {
+fn parseArgs() !Arguments {
     const argv = std.os.argv;
     var args: Arguments = .{};
     for (argv, 0..) |arg, i| {
@@ -74,29 +74,28 @@ fn parse_args() !Arguments {
 }
 
 pub fn main() !void {
-    const args = try parse_args();
+    const args = try parseArgs();
     const stream = std.net.connectUnixSocket("/tmp/yin") catch {
         std.log.err("Could not connect to Yin daemon. Please ensure it is running before attempting to use IPC", .{});
         std.posix.exit(1);
     };
     if (args.img) |img| {
-        try send_set_image(img, &stream, args);
+        try sendSetImage(img, &stream, args);
     } else if (args.color) |color| {
-        try send_hex_code(color, &stream, args);
+        try sendSetHexcode(color, &stream, args);
     } else if (args.restore) |restore| {
-        if (restore) try send_restore(&stream, args);
+        if (restore) try sendRestore(&stream, args);
     } else if (args.pause) |_| {
-        try send_toggle_play(false, &stream, args);
+        try sendTogglePlay(false, &stream, args);
     } else if (args.play) |_| {
-        try send_toggle_play(true, &stream, args);
+        try sendTogglePlay(true, &stream, args);
     } else {
-        print_help();
+        printHelp();
     }
     defer stream.close();
-    std.log.info("Request sent to Daemon", .{});
 }
 
-fn get_monitor_dimensions(
+fn getMonitorDimensions(
     stream: *const std.net.Stream,
     output: ?[]u8,
 ) !shared.MonitorSize {
@@ -114,7 +113,7 @@ fn get_monitor_dimensions(
     const bytes_read = try stream.read(&buf);
     const res = buf[0..bytes_read];
 
-    const x_pos = std.mem.indexOf(u8, res, "x") orelse return error.InvalidDimensions;
+    const x_pos = std.mem.indexOf(u8, res, "x") orelse return error.InvalidMonitorDimensions;
     const width_str = res[0..x_pos];
     const height_str = res[x_pos + 1 ..];
     const width = try std.fmt.parseInt(u32, width_str, 10);
@@ -125,7 +124,7 @@ fn get_monitor_dimensions(
     };
 }
 
-fn print_help() void {
+fn printHelp() void {
     const help =
         \\ Yin, An efficient wallpaper daemon for Wayland Compositors, controlled at runtime
         \\ --img:                             Pass an image or animated gif for the daemon to display
@@ -139,7 +138,7 @@ fn print_help() void {
     std.debug.print(help, .{});
     std.posix.exit(1);
 }
-fn send_set_image(
+fn sendSetImage(
     path: []u8,
     stream: *const std.net.Stream,
     args: Arguments,
@@ -150,7 +149,7 @@ fn send_set_image(
     var cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin", safe_name });
     defer allocator.free(cache_file_path);
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
-        cache_file_path = try cache_image(
+        cache_file_path = try cacheImage(
             path,
             stream,
             args,
@@ -170,6 +169,10 @@ fn send_set_image(
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
     std.log.info("Applying...", .{});
+    try readIpcResponse(stream);
+}
+
+fn readIpcResponse(stream: *const std.net.Stream) !void {
     // wait for a reading
     var response: [1000]u8 = undefined;
     const bytes_read = stream.read(&response) catch |err| switch (err) {
@@ -181,7 +184,7 @@ fn send_set_image(
     }
 }
 
-fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream, args: Arguments) !void {
+fn sendSetHexcode(hexcode: []u8, stream: *const std.net.Stream, args: Arguments) !void {
     const msg: shared.Message = .{
         .output = args.output,
         .payload = .{
@@ -194,9 +197,10 @@ fn send_hex_code(hexcode: []u8, stream: *const std.net.Stream, args: Arguments) 
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
+    try readIpcResponse(stream);
 }
 
-fn send_restore(stream: *const std.net.Stream, args: Arguments) !void {
+fn sendRestore(stream: *const std.net.Stream, args: Arguments) !void {
     const msg: shared.Message = .{
         .output = args.output,
         .payload = .Restore,
@@ -205,14 +209,10 @@ fn send_restore(stream: *const std.net.Stream, args: Arguments) !void {
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
-    var dummy: [1]u8 = undefined;
-    _ = stream.read(&dummy) catch |err| switch (err) {
-        error.BrokenPipe => {}, // Expected when server closes
-        else => return err,
-    };
+    try readIpcResponse(stream);
 }
 
-fn send_toggle_play(
+fn sendTogglePlay(
     play: bool,
     stream: *const std.net.Stream,
     args: Arguments,
@@ -230,14 +230,15 @@ fn send_toggle_play(
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
+    try readIpcResponse(stream);
 }
 
-fn cache_image(
+fn cacheImage(
     path: []const u8,
     stream: *const std.net.Stream,
     args: Arguments,
 ) ![]u8 {
-    const monitor_size = try get_monitor_dimensions(stream, args.output);
+    const monitor_size = try getMonitorDimensions(stream, args.output);
     std.log.info("Requested monitor has dimensions {d}x{d}", .{ monitor_size.width, monitor_size.height });
     //create paths
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
@@ -255,7 +256,7 @@ fn cache_image(
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
     //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
     if (std.mem.endsWith(u8, path, ".gif") or std.mem.endsWith(u8, path, ".mp4")) {
-        try cache_animated_gif(path, &pixel_cache_file, args.downsize, monitor_size);
+        try cacheAnimation(path, &pixel_cache_file, args.downsize, monitor_size);
         return pixel_cache_file_path;
     }
     std.log.info("Loading Image...", .{});
@@ -265,7 +266,7 @@ fn cache_image(
     defer allocator.free(cache_dir);
     defer pixel_cache_file.close();
     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
-    var pixel_data = try to_argb(image.pixels.rgba32);
+    var pixel_data = try toArgb(image.pixels.rgba32);
     //write static since it is not animated
     const static = "static";
     var HEIGHT = image.height;
@@ -325,14 +326,14 @@ fn cache_image(
     return pixel_cache_file_path;
 }
 
-fn cache_animated_gif(path: []const u8, file: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
+fn cacheAnimation(path: []const u8, file: *const std.fs.File, downsize: bool, monitor_size: shared.MonitorSize) !void {
     //write animated since it is  animated
     const animated = "animated";
     try file.writer().writeInt(u8, animated.len, .little);
     try file.writer().writeAll(animated);
     try videoloader.load_video(path, file, downsize, monitor_size);
 }
-fn to_argb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
+fn toArgb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
     var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);
     for (0..pixels.len) |p| {
         const a: u32 = @as(u32, @intCast(pixels[p].a));
