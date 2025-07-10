@@ -48,13 +48,6 @@ fn parseArgs() !Arguments {
         if (std.mem.order(u8, arg_span, "--play") == .eq) {
             args.play = true;
         }
-        // if (std.mem.order(u8, arg_span, "--downsize") == .eq) {
-        //     if (i + 1 >= argv.len) {
-        //         std.log.err("No argument provided to --downsize flag", .{});
-        //         return error.NoDownsize;
-        //     }
-        //     args.downsize = std.mem.orderZ(u8, argv[i + 1], "true") == .eq;
-        // }
         if (std.mem.order(u8, arg_span, "--trans") == .eq) {
             if (i + 1 >= argv.len) {
                 std.log.err("No transition provided to --trans flag. Valid options are 'top-bottom' 'bottom-top' 'left-right' 'right-left' and 'none'", .{});
@@ -124,7 +117,7 @@ fn getMonitorDimensions(
     };
 }
 
-fn printHelp() void {
+fn printHelp() noreturn {
     const help =
         \\ Yin, An efficient wallpaper daemon for Wayland Compositors, controlled at runtime
         \\ --img:                             Pass an image or animated gif for the daemon to display
@@ -149,6 +142,7 @@ fn sendSetImage(
     var cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin", safe_name });
     defer allocator.free(cache_file_path);
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
+        //cache the image if we couldn't find the cache
         cache_file_path = try cacheImage(
             path,
             stream,
@@ -271,7 +265,9 @@ fn cacheImage(
     const static = "static";
     var HEIGHT = image.height;
     var WIDTH = image.width;
-    if (args.downsize) {
+    // const shouldResize: bool = args.downsize;
+    const shouldResize = false; //skip resizing for now
+    if (shouldResize) {
         //only downsize if need be
         if (image.width > monitor_size.width or image.height > monitor_size.height) {
             std.log.info("Downsizing to  {d}x{d}", .{ monitor_size.width, monitor_size.height });
@@ -315,11 +311,9 @@ fn cacheImage(
     //write compressed len
     try pixel_cache_file.writer().writeInt(u32, @intCast(compressed_size), .little);
     //write height
-    try pixel_cache_file.writer().writeInt(u32, @intCast(HEIGHT), .little);
+    try pixel_cache_file.writer().writeInt(u16, @intCast(HEIGHT), .little);
     //write width
-    try pixel_cache_file.writer().writeInt(u32, @intCast(WIDTH), .little);
-    //write stride
-    try pixel_cache_file.writer().writeInt(u8, image.pixelFormat().pixelStride(), .little);
+    try pixel_cache_file.writer().writeInt(u16, @intCast(WIDTH), .little);
     //write data
     try pixel_cache_file.writer().writeAll(compressed_buffer[0..@intCast(compressed_size)]);
     std.log.info("Cache Complete", .{});

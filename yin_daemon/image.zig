@@ -42,16 +42,15 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     //read compressed len
     const compressed_len = try file.reader().readInt(u32, .little);
     //read height
-    const height = try file.reader().readInt(u32, .little);
+    const height = try file.reader().readInt(u16, .little);
     //read width
-    const width = try file.reader().readInt(u32, .little);
+    const width = try file.reader().readInt(u16, .little);
     //read stride
-    const stride = try file.reader().readInt(u8, .little);
+    const stride: usize = 4;
     //read data
     const bytes_to_read = compressed_len;
     const compressed_data_buffer = try allocator.alloc(u8, bytes_to_read);
     defer allocator.free(compressed_data_buffer);
-
     _ = try file.reader().readAll(compressed_data_buffer);
     const original_size: u32 = original_len * @sizeOf(u32);
     const decompressed_buffer = try allocator.alloc(u8, original_size);
@@ -67,12 +66,17 @@ pub fn load_image(path: []const u8, output: *Output) !?ImageResponse {
     var pixel_data = std.ArrayList(u32).init(allocator);
     try pixel_data.resize(decompressed_data.len);
     @memcpy(pixel_data.items, decompressed_data);
-    const src_img = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))), @intCast(stride * width)) orelse return error.NoPixmanImage;
+    const src_img = pixman.Image.createBits(
+        .a8r8g8b8,
+        @intCast(width),
+        @intCast(height),
+        @as([*]u32, @ptrCast(@alignCast(pixel_data.items.ptr))),
+        @intCast(stride * width),
+    ) orelse return error.NoPixmanImage;
     const src = try allocator.create(Image);
     src.* = .{ .src = src_img, .pixel_data = pixel_data };
     return ImageResponse{ .Static = .{ .image = src } };
 }
-
 
 pub fn deinit(image: *Image) void {
     image.pixel_data.deinit(); //destroy pixel data
@@ -97,15 +101,15 @@ fn calculate_transform(image_dimension: c_int, output_dimension: u32, dimension_
     return numerator2 / 2 / dimension_scale;
 }
 //transform, thanks beanbag
-pub fn Scale(self: *Image, width: u32, height: u32, scale: u32) void {
+pub fn Scale(self: *Image, output_width: u32, output_height: u32, scale: u32) void {
     var image = self.src;
-    var sx: f64 = @as(f64, @floatFromInt(image.getWidth())) / @as(f64, @floatFromInt(width * scale));
-    var sy: f64 = calculate_scale(image.getHeight(), height, scale);
+    var sx: f64 = @as(f64, @floatFromInt(image.getWidth())) / @as(f64, @floatFromInt(output_width * scale));
+    var sy: f64 = calculate_scale(image.getHeight(), output_height, scale);
     const s = if (sx > sy) sy else sx;
     sx = s;
     sy = s;
-    const tx: f64 = calculate_transform(image.getWidth(), width, sx);
-    const ty: f64 = calculate_transform(image.getWidth(), height, sy);
+    const tx: f64 = calculate_transform(image.getWidth(), output_width, sx);
+    const ty: f64 = calculate_transform(image.getWidth(), output_height, sy);
 
     var t: pixman.FTransform = undefined;
     var t2: pixman.Transform = undefined;

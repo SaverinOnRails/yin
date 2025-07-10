@@ -22,8 +22,21 @@ pub fn get_static_image_buffer(output: *Output, src_img: *image.Image, force_new
     const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height, force_new) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
     suitable_buffer.used = true;
-    src_img.Scale(scaled_width, scaled_height, 1);
-    pixman.Image.composite32(.src, src_img.src, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
+    src_img.Scale(scaled_width, scaled_height, @intCast(output.scale));
+    pixman.Image.composite32(
+        .src,
+        src_img.src,
+        null,
+        suitable_buffer.pixman_image,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        @intCast(scaled_width),
+        @intCast(scaled_height),
+    );
     return suitable_buffer;
 }
 
