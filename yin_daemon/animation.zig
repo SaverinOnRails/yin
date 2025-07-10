@@ -100,7 +100,10 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
         );
         base_frame = data;
         //must be the same resolution, todo: this is really stupid
-        if (data.len != decompressed_data_slice.len) return error.IncorrectDimension;
+        if (data.len != decompressed_data_slice.len) {
+            std.log.debug("dimensions were not correct", .{});
+            return error.IncorrectDimension;
+        }
         @memcpy(data, decompressed_data_slice);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});

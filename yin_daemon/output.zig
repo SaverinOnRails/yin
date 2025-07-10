@@ -14,6 +14,7 @@ wlOutput: *wl.Output,
 wlSurface: ?*wl.Surface = null,
 wayland_name: u32 = 0,
 buffer_ring: std.SinglyLinkedList(PoolBuffer) = .{}, //this is honestly pointless
+active_buffer: ?*PoolBuffer = null,
 scale: i32 = 0,
 height: u32 = 0,
 width: u32 = 0,
@@ -181,15 +182,15 @@ fn render_static_image(output: *Output, img: *image.Image, transition: shared.Tr
     defer img.deinit(); //deinit static image
     const surface = output.wlSurface orelse return;
     //force a new buffer when using transitions to avoid overwriting the memory of the current output
-    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img, true) catch {
+    const poolbuffer = PoolBuffer.get_static_image_buffer(output, img) catch {
         std.log.err("Failed to create buffer", .{});
         return;
     };
     if (transition != .None) {
-        if (output.current_mmap) |mmap| {
+        if (output.active_buffer) |buffer| {
             //todo: very annoying memory leak here
             try Transition.play_transition(
-                mmap,
+                buffer.memory_map,
                 poolbuffer.pixman_image,
                 output,
                 poolbuffer,
@@ -198,10 +199,7 @@ fn render_static_image(output: *Output, img: *image.Image, transition: shared.Tr
             return;
         }
     }
-    if (output.current_mmap) |mmap| {
-        std.posix.munmap(mmap);
-    }
-    output.current_mmap = poolbuffer.memory_map;
+    output.active_buffer = poolbuffer;
     surface.attach(poolbuffer.wlBuffer, 0, 0);
     surface.damage(0, 0, @intCast(output.width), @intCast(output.width));
     surface.setBufferScale(output.scale);

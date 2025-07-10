@@ -34,12 +34,8 @@ pub fn play_transition(
     const height = output.height * scale;
     const width = output.width * scale;
     const stride = width * 4;
-    defer _ = new_pixman_ref.unref();
-
     const new_pixman_data_copy = try allocator.alloc(u32, height * width);
     defer allocator.free(new_pixman_data_copy);
-    defer std.posix.munmap(original_memory_map); 
-
     //create a copy of the new pixman image
     @memcpy(new_pixman_data_copy, new_pixman_ref.getData().?[0 .. height * width]);
     const new_pixman = pixman.Image.createBits(
@@ -51,11 +47,15 @@ pub fn play_transition(
     );
     defer _ = new_pixman.?.unref();
 
+    const initial_pixman_data_copy = try allocator.alloc(u8, height * width * 4);
+    defer allocator.free(initial_pixman_data_copy);
+    //create a copy of the initial pixman image
+    @memcpy(initial_pixman_data_copy, original_memory_map);
     const initial_pixman = pixman.Image.createBits(
         .a8r8g8b8,
         @intCast(width),
         @intCast(height),
-        @ptrCast(@alignCast(original_memory_map.ptr)),
+        @ptrCast(@alignCast(initial_pixman_data_copy)),
         @intCast(stride),
     );
     defer _ = initial_pixman.?.unref();
@@ -78,7 +78,9 @@ pub fn play_transition(
         );
         std.Thread.sleep(frame_duration_ms * std.time.ns_per_ms);
     }
-    output.current_mmap = poolbuffer.memory_map;
+    //release this buffer to be reused
+    output.active_buffer.?.busy = false;
+    output.active_buffer = poolbuffer;
 }
 
 const SlideParams = struct {

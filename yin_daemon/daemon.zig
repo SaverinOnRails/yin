@@ -82,10 +82,6 @@ pub fn init() !void {
             if (daemon.pollfds.items[node.data.event_index].revents & posix.POLL.IN != 0) {
                 var timer_data: u64 = undefined;
                 _ = posix.read(node.data.timer_fd, std.mem.asBytes(&timer_data)) catch {};
-                // const output_node = daemon.Outputs.first orelse continue; //use first output for now
-                // output_node.data.play_animation_frame(&node.data) catch {
-                //     std.log.err("Could not play animation frame", .{});
-                // };
                 node.data.play_frame(&daemon.Outputs.first.?.data) catch {};
             }
         }

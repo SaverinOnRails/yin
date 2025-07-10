@@ -100,7 +100,8 @@ fn calculate_transform(image_dimension: c_int, output_dimension: u32, dimension_
 
     return numerator2 / 2 / dimension_scale;
 }
-//transform, thanks beanbag
+
+//transform, thanks beanbag, i still do not really understand what happens here
 pub fn Scale(self: *Image, output_width: u32, output_height: u32, scale: u32) void {
     var image = self.src;
     var sx: f64 = @as(f64, @floatFromInt(image.getWidth())) / @as(f64, @floatFromInt(output_width * scale));

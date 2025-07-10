@@ -11,18 +11,21 @@ wlBuffer: *wl.Buffer,
 height: u32,
 width: u32,
 busy: bool,
-used: bool = false,
 memory_map: []align(4096) u8,
 pixman_image: *pixman.Image,
 const MAX_BUFFERS = 2;
-pub fn get_static_image_buffer(output: *Output, src_img: *image.Image, force_new: bool) !*PoolBuffer {
+pub fn get_static_image_buffer(output: *Output, src_img: *image.Image) !*PoolBuffer {
     const scale: u32 = @intCast(output.scale);
     const scaled_width = output.width * scale;
     const scaled_height = output.height * scale;
-    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height, force_new) orelse return error.NoSuitableBuffer;
+    const suitable_buffer = PoolBuffer.next_buffer(
+        output,
+        scaled_width,
+        scaled_height,
+    ) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
-    suitable_buffer.used = true;
     src_img.Scale(scaled_width, scaled_height, @intCast(output.scale));
+
     pixman.Image.composite32(
         .src,
         src_img.src,
@@ -48,9 +51,8 @@ pub fn get_solid_color_buffer(output: *Output, hex: u32) !*wl.Buffer {
     hex_to_pixman_color(hex, &color);
     const solid = pixman.Image.createSolidFill(&color);
     defer _ = solid.?.unref();
-    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height, false) orelse return error.NoSuitableBuffer;
+    const suitable_buffer = PoolBuffer.next_buffer(output, scaled_width, scaled_height) orelse return error.NoSuitableBuffer;
     suitable_buffer.busy = true;
-    suitable_buffer.used = true;
     pixman.Image.composite32(.src, solid.?, null, suitable_buffer.pixman_image, 0, 0, 0, 0, 0, 0, @intCast(scaled_width), @intCast(scaled_height));
     return suitable_buffer.wlBuffer;
 }
@@ -74,11 +76,15 @@ pub fn new_buffer(output: *Output) !?*PoolBuffer {
     const data = try posix.mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, .{ .TYPE = .SHARED }, fd, 0);
     const shm_pool = try output.daemon.wlShm.?.createPool(fd, @intCast(size));
     defer shm_pool.destroy();
-
     const wlBuffer = try shm_pool.createBuffer(0, @intCast(width), @intCast(height), @intCast(stride), .argb8888);
-    const data_slice = @as([*]u32, @ptrCast(@alignCast(data.ptr)));
     //create pixman image
-    const pixman_image = pixman.Image.createBits(.a8r8g8b8, @intCast(width), @intCast(height), data_slice, @intCast(stride));
+    const pixman_image = pixman.Image.createBits(
+        .a8r8g8b8,
+        @intCast(width),
+        @intCast(height),
+        @ptrCast(@alignCast(data.ptr)),
+        @intCast(stride),
+    );
     const poolbuffer = try allocator.create(PoolBuffer);
     poolbuffer.* = .{
         .wlBuffer = wlBuffer,
@@ -102,11 +108,8 @@ fn buffer_listener(_: *wl.Buffer, event: wl.Buffer.Event, poolBuffer: *PoolBuffe
     }
 }
 
-pub fn next_buffer(output: *Output, width: u32, height: u32, force_new: bool) ?*PoolBuffer {
-    // if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
-    if (force_new) {
-        return add_buffer_to_ring(output);
-    }
+pub fn next_buffer(output: *Output, width: u32, height: u32) ?*PoolBuffer {
+    if (output.buffer_ring.len() > MAX_BUFFERS) trimBuffers(output);
     var it = output.buffer_ring.first;
     while (it) |node| : (it = node.next) {
         if (node.data.width == width and node.data.height == height and node.data.busy == false) {
@@ -122,8 +125,7 @@ fn trimBuffers(output: *Output) void {
     std.log.debug("Trying to tirm buffers, len {d}", .{output.buffer_ring.len()});
     while (it) |node| {
         const next = node.next;
-        if (node.data.busy == false and node.data.used == true) {
-            std.log.debug("mmap len is {d}", .{node.data.memory_map.len});
+        if (node.data.busy == false) {
             node.data.deinit();
             output.buffer_ring.remove(node);
             allocator.destroy(node);
@@ -149,7 +151,7 @@ pub fn add_buffer_to_ring(output: *Output) *PoolBuffer {
         std.posix.exit(1);
     };
     node.data = buffer.?.*;
-    node.data.setListener();
+    // node.data.setListener();
     output.buffer_ring.prepend(node);
     return &node.data;
 }
