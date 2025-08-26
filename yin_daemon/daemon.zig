@@ -144,8 +144,8 @@ fn configure(
     _: *Daemon,
     output: *Output,
     render_type: shared.MessagePayload,
-) void {
-    output.render(render_type) catch return;
+) !void {
+    try output.render(render_type);
 }
 
 fn togglePlay(daemon: *Daemon, output: *Output, play: bool) void {
@@ -167,18 +167,24 @@ fn handleIpcMessage(daemon: *Daemon, message: shared.Message, conn: *const std.n
     const requested_output = try daemon.getTargetMonitorFromName(&conn.stream, message.output);
     switch (message.payload) {
         .Image => |s| {
-            daemon.configure(requested_output, message.payload);
+            daemon.configure(requested_output, message.payload) catch {
+                //any error while applying should trigger this
+                try conn.stream.writer().writeAll("Cache file missing or corrupt, Please clear cache (~/.cache/yin) and try again.");
+                return;
+            };
             allocator.free(s.path);
         },
         .Color => |c| {
-            daemon.configure(requested_output, message.payload);
+            daemon.configure(requested_output, message.payload) catch return;
             allocator.free(c.hexcode);
         },
         .Restore => {
             daemon.configure(
                 requested_output,
                 message.payload,
-            );
+            ) catch {
+                return try conn.stream.writer().writeAll("Cache file missing or corrupt, Please clear cache (~/.cache/yin) and try again.");
+            };
         },
         .Pause => {
             daemon.togglePlay(requested_output, false);
@@ -187,8 +193,6 @@ fn handleIpcMessage(daemon: *Daemon, message: shared.Message, conn: *const std.n
             daemon.togglePlay(requested_output, true);
         },
         .MonitorSize => {
-            //return the dimensions of the requested output, TODO: should take an output identifier
-            //first output for now
             if (!requested_output.configured) return;
             var buffer: [100]u8 = undefined;
             const dim = try std.fmt.bufPrint(&buffer, "{d}x{d}", .{
