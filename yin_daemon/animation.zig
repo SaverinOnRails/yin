@@ -228,7 +228,7 @@ pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
     surface.commit();
     //schedule next frame
     if (self.current_frame + 1 >= self.framecount) {
-        self.current_frame = 1;
+        self.current_frame = 0;
     } else {
         self.current_frame += 1;
     }
