@@ -249,7 +249,11 @@ fn cacheImage(
     const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
     //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
-    if (std.mem.endsWith(u8, path, ".gif") or std.mem.endsWith(u8, path, ".mp4")) {
+    if (std.mem.endsWith(u8, path, ".gif") or
+        std.mem.endsWith(u8, path, ".mp4") or
+        std.mem.endsWith(u8, path, ".mkv") or
+        std.mem.endsWith(u8, path, ".webm"))
+    {
         try cacheAnimation(path, &pixel_cache_file, args.downsize, monitor_size);
         return pixel_cache_file_path;
     }
