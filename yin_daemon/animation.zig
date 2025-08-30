@@ -17,7 +17,7 @@ current_frame: u32 = 0,
 base_frame: []align(4096) u8,
 timer_fd: posix.fd_t,
 event_index: usize = 1,
-framebuffer: []u8, //buffer big enough for a single frame, this is so we dont allocate a new one when we decompress during each render
+framebuffer: []u8, //buffer big enough for a single run length encoding, this is so we dont allocate a new one when we decompress during each render
 output_name: u32 = 0,
 poolBuffer: *Buffer.PoolBuffer, //todo, should not be a pool buffer on animation
 
@@ -110,8 +110,8 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
 
-    //this is fine since the resolution will always match the monitor
-    const framebuffer = try gpa.alloc(u8, output.height * output.width * @sizeOf(u32));
+    //worst case scenario for when there are no equal runs, yeah this is retarded
+    const framebuffer = try gpa.alloc(u8, output.height * output.width * @sizeOf(u32) * 2 + 100);
     return ImageResponse{ .Animated = .{ .image = .{
         .durations = durations,
         .framecount = number_of_frames,
@@ -187,7 +187,6 @@ pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
                 @intCast(delta_data_compressed.len),
                 @intCast(self.framebuffer.len),
             );
-            std.debug.print("{d}\n\n", .{decompressed_size});
             const delta_data: []u8 = self.framebuffer[0..@intCast(decompressed_size)];
             // warning: no bounds checking
             while (index < delta_data.len) {
