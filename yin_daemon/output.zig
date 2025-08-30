@@ -126,6 +126,7 @@ pub fn render(output: *Output, render_type: shared.MessagePayload) !void {
         .Restore => {
             output.restore_wallpaper() catch |err| {
                 std.log.err("Could not restore wallapaper {s}", .{@errorName(err)});
+                return err;
             };
         },
         else => {},

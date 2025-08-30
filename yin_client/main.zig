@@ -1,13 +1,14 @@
 pub const std_options: std.Options = .{ .log_level = .info };
 const std = @import("std");
 const flags = @import("flags");
+const hash = std.crypto.hash;
 const stb = @import("stb");
 const videoloader = @import("videoloader.zig");
 const crypto = @import("std").crypto;
 const zigimg = @import("zigimg");
 const shared = @import("shared");
 const lz4 = shared.lz4;
-const allocator = @import("videoloader.zig").allocator;
+const gpa = @import("videoloader.zig").allocator;
 const Transition = shared.Transition;
 const Arguments = struct {
     img: ?[]u8 = null,
@@ -96,7 +97,7 @@ fn getMonitorDimensions(
         .payload = .MonitorSize,
         .output = output,
     };
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(u8).init(gpa);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
@@ -136,18 +137,18 @@ fn sendSetImage(
     stream: *const std.net.Stream,
     args: Arguments,
 ) !void {
-    //check if a cache file fot this exists
-    const safe_name = try sanitizeForFilename(path);
+    //check if a cache file for this exists
+    const monitor_size = try getMonitorDimensions(stream, args.output);
+    //we cache with the resolution and the name of the file.
+    const pathWithResolution = try std.fmt.allocPrint(gpa, "{d}x{d}{s}", .{ monitor_size.width, monitor_size.height, path });
+    const safe_name = try md5ForFilename(pathWithResolution);
+    defer gpa.free(safe_name);
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
-    var cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin", safe_name });
-    defer allocator.free(cache_file_path);
+    var cache_file_path = try std.fs.path.join(gpa, &[_][]const u8{ home, ".cache", "yin", safe_name });
+    defer gpa.free(cache_file_path);
     _ = std.fs.openFileAbsolute(cache_file_path, .{}) catch {
         //cache the image if we couldn't find the cache
-        cache_file_path = try cacheImage(
-            path,
-            stream,
-            args,
-        );
+        cache_file_path = try cacheImage(path, args, monitor_size, safe_name);
     };
     const msg: shared.Message = .{
         .output = args.output,
@@ -158,7 +159,7 @@ fn sendSetImage(
             },
         },
     };
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(u8).init(gpa);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
@@ -187,7 +188,7 @@ fn sendSetHexcode(hexcode: []u8, stream: *const std.net.Stream, args: Arguments)
             },
         },
     };
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(u8).init(gpa);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
@@ -199,7 +200,7 @@ fn sendRestore(stream: *const std.net.Stream, args: Arguments) !void {
         .output = args.output,
         .payload = .Restore,
     };
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(u8).init(gpa);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
@@ -220,7 +221,7 @@ fn sendTogglePlay(
     } else {
         msg.payload = .Pause;
     }
-    var buffer = std.ArrayList(u8).init(allocator);
+    var buffer = std.ArrayList(u8).init(gpa);
     defer buffer.deinit();
     try shared.SerializeMessage(msg, buffer.writer());
     _ = try stream.write(buffer.items);
@@ -229,14 +230,14 @@ fn sendTogglePlay(
 
 fn cacheImage(
     path: []const u8,
-    stream: *const std.net.Stream,
     args: Arguments,
+    monitor_size: shared.MonitorSize,
+    safe_name: []u8,
 ) ![]u8 {
-    const monitor_size = try getMonitorDimensions(stream, args.output);
     std.log.info("Requested monitor has dimensions {d}x{d}", .{ monitor_size.width, monitor_size.height });
     //create paths
     const home = std.posix.getenv("HOME") orelse return error.NoHomeVariable;
-    const cache_dir = try std.fs.path.join(allocator, &[_][]const u8{ home, ".cache", "yin" });
+    const cache_dir = try std.fs.path.join(gpa, &[_][]const u8{ home, ".cache", "yin" });
     //try create cache dir
     std.fs.makeDirAbsolute(cache_dir) catch |err| {
         switch (err) {
@@ -244,10 +245,9 @@ fn cacheImage(
             else => return err,
         }
     };
-    const safe_file_name = try sanitizeForFilename(path);
-    defer allocator.free(safe_file_name);
-    const pixel_cache_file_path = try std.fs.path.join(allocator, &[_][]const u8{ cache_dir, safe_file_name });
+    const pixel_cache_file_path = try std.fs.path.join(gpa, &[_][]const u8{ cache_dir, safe_name });
     const pixel_cache_file = try std.fs.createFileAbsolute(pixel_cache_file_path, .{});
+
     //very crude,but currently the quickest way i can determine if a file is a gif without parsing the whole thing:
     if (std.mem.endsWith(u8, path, ".gif") or
         std.mem.endsWith(u8, path, ".mp4") or
@@ -258,10 +258,10 @@ fn cacheImage(
         return pixel_cache_file_path;
     }
     std.log.info("Loading Image...", .{});
-    var image = try zigimg.Image.fromFilePath(allocator, path);
+    var image = try zigimg.Image.fromFilePath(gpa, path);
     std.log.info("Caching image. Resolution : {d}x{d}", .{ image.width, image.width });
     defer image.deinit();
-    defer allocator.free(cache_dir);
+    defer gpa.free(cache_dir);
     defer pixel_cache_file.close();
     if (image.pixelFormat() != .rgba32) try image.convert(.rgba32);
     var pixel_data = try toArgb(image.pixels.rgba32);
@@ -276,7 +276,7 @@ fn cacheImage(
         if (image.width > monitor_size.width or image.height > monitor_size.height) {
             std.log.info("Downsizing to  {d}x{d}", .{ monitor_size.width, monitor_size.height });
             const pixel_data_u8 = std.mem.sliceAsBytes(pixel_data.items);
-            const output_pixels_u8 = try allocator.alloc(u8, monitor_size.height * monitor_size.width * @sizeOf(u32));
+            const output_pixels_u8 = try gpa.alloc(u8, monitor_size.height * monitor_size.width * @sizeOf(u32));
             _ = stb.stbir_resize_uint8_srgb(
                 @ptrCast(@alignCast(pixel_data_u8.ptr)),
                 @intCast(image.width),
@@ -304,8 +304,8 @@ fn cacheImage(
     try pixel_cache_file.writer().writeInt(u32, @intCast(pixel_data.items.len), .little);
     //compress
     const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
-    const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
-    defer allocator.free(compressed_buffer);
+    const compressed_buffer = try gpa.alloc(u8, @intCast(max_compressed_size));
+    defer gpa.free(compressed_buffer);
     const compressed_size = lz4.LZ4_compress_default(
         @ptrCast(@alignCast(pixel_bytes.ptr)),
         @ptrCast(@alignCast(compressed_buffer.ptr)),
@@ -332,7 +332,7 @@ fn cacheAnimation(path: []const u8, file: *const std.fs.File, downsize: bool, mo
     try videoloader.load_video(path, file, downsize, monitor_size);
 }
 fn toArgb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
-    var arraylist = try std.ArrayList(u32).initCapacity(allocator, pixels.len);
+    var arraylist = try std.ArrayList(u32).initCapacity(gpa, pixels.len);
     for (0..pixels.len) |p| {
         const a: u32 = @as(u32, @intCast(pixels[p].a));
         const r: u32 = @as(u32, @intCast(pixels[p].r));
@@ -344,15 +344,12 @@ fn toArgb(pixels: []zigimg.color.Rgba32) !std.ArrayList(u32) {
     return arraylist;
 }
 
-fn sanitizeForFilename(path: []const u8) ![]u8 {
-    const max_filename_len = 255;
-    const len = @min(path.len, max_filename_len);
-    const result = try allocator.dupe(u8, path[0..len]);
-    for (result) |*char| {
-        switch (char.*) {
-            '/', '\\', ':', '*', '?', '"', '<', '>', '|' => char.* = '_',
-            else => {},
-        }
-    }
-    return result;
+fn md5ForFilename(path: []const u8) ![]u8 {
+    var hasher = hash.Md5.init(.{});
+    hasher.update(path);
+    var _hash: [16]u8 = undefined;
+    hasher.final(&_hash);
+    const hex_string = try gpa.alloc(u8, 32);
+    _ = try std.fmt.bufPrint(hex_string, "{}", .{std.fmt.fmtSliceHexLower(&_hash)});
+    return hex_string;
 }
