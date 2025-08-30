@@ -187,6 +187,7 @@ pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
                 @intCast(delta_data_compressed.len),
                 @intCast(self.framebuffer.len),
             );
+            std.debug.print("{d}\n\n", .{decompressed_size});
             const delta_data: []u8 = self.framebuffer[0..@intCast(decompressed_size)];
             // warning: no bounds checking
             while (index < delta_data.len) {
