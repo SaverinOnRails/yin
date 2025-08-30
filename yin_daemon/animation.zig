@@ -4,30 +4,32 @@ const lz4 = @import("shared").lz4;
 const posix = std.posix;
 const pixman = @import("pixman");
 const Output = @import("output.zig").Output;
-const allocator = @import("util.zig").allocator;
+const gpa = @import("util.zig").allocator;
 const Buffer = @import("Buffer.zig");
 const Image = @import("image.zig").Image;
 //use global allocator
 pub const AnimatedImage = @This();
 pub const ImageResponse = @import("image.zig").ImageResponse;
 framecount: usize,
-durations: []f32,
+durations: []f32, //TODO: this is dumb since they all have the same durations
 delta_mmaps: [][]align(4096) u8,
 current_frame: u32 = 0,
 base_frame: []align(4096) u8,
 timer_fd: posix.fd_t,
 event_index: usize = 1,
+framebuffer: []u8, //buffer big enough for a single frame, this is so we dont allocate a new one when we decompress during each render
 output_name: u32 = 0,
 poolBuffer: *Buffer.PoolBuffer, //todo, should not be a pool buffer on animation
 
 pub fn deinit(self: *AnimatedImage) void {
-    allocator.free(self.durations);
+    gpa.free(self.durations);
     for (self.delta_mmaps, 0..) |dm, i| {
-        //first item in this array is invald
+        //first item in this array is invalid
         if (i == 0) continue;
         std.posix.munmap(dm);
     }
-    allocator.free(self.delta_mmaps);
+    gpa.free(self.delta_mmaps);
+    gpa.free(self.framebuffer);
     std.posix.munmap(self.base_frame);
     self.poolBuffer.deinit();
 }
@@ -39,7 +41,7 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
     var fbs = file;
     defer {
         file.close();
-        allocator.destroy(file);
+        gpa.destroy(file);
     }
     const number_of_frames = try fbs.reader().readInt(u32, .little);
     _ = try fbs.reader().readInt(u32, .little);
@@ -47,8 +49,8 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
     _ = try fbs.reader().readInt(u8, .little);
 
     //Go through frames
-    var durations: []f32 = try allocator.alloc(f32, number_of_frames);
-    const delta_mmaps = try allocator.alloc([]align(4096) u8, number_of_frames);
+    var durations: []f32 = try gpa.alloc(f32, number_of_frames);
+    const delta_mmaps = try gpa.alloc([]align(4096) u8, number_of_frames);
     var base_frame: []align(4096) u8 = undefined;
     const poolBuffer = try Buffer.new_buffer(output);
     for (0..number_of_frames) |i| {
@@ -66,20 +68,20 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
             };
             continue;
         }
-
+        //first frame:
         const duration_length = try fbs.reader().readInt(u32, .little);
-        const duration_buffer = try allocator.alloc(u8, duration_length);
-        defer allocator.free(duration_buffer);
+        const duration_buffer = try gpa.alloc(u8, duration_length);
+        defer gpa.free(duration_buffer);
         _ = try fbs.reader().readAll(duration_buffer);
         const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
         durations[i] = duration;
         const original_pixel_len = try fbs.reader().readInt(u32, .little);
         const compressed_pixel_len = try fbs.reader().readInt(u32, .little);
-        const compressed_buffer = try allocator.alloc(u8, compressed_pixel_len);
-        defer allocator.free(compressed_buffer);
+        const compressed_buffer = try gpa.alloc(u8, compressed_pixel_len);
+        defer gpa.free(compressed_buffer);
         _ = try fbs.reader().readAll(compressed_buffer);
-        const decompressed_buffer = try allocator.alloc(u8, original_pixel_len * @sizeOf(u32));
-        defer allocator.free(decompressed_buffer);
+        const decompressed_buffer = try gpa.alloc(u8, original_pixel_len * @sizeOf(u32));
+        defer gpa.free(decompressed_buffer);
         const decompressed_size = lz4.LZ4_decompress_safe(
             @ptrCast(@alignCast(compressed_buffer.ptr)),
             @ptrCast(@alignCast(decompressed_buffer.ptr)),
@@ -99,7 +101,7 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
             0,
         );
         base_frame = data;
-        //must be the same resolution, todo: this is really stupid
+        //must be the same resolution, this is fine actually since any animation must match the output size
         if (data.len != decompressed_data_slice.len) {
             std.log.debug("dimensions were not correct", .{});
             return error.IncorrectDimension;
@@ -107,10 +109,14 @@ pub fn load(file: *std.fs.File, output: *Output) !?ImageResponse {
         @memcpy(data, decompressed_data_slice);
     }
     const timer_fd = try std.posix.timerfd_create(.MONOTONIC, .{});
+
+    //this is fine since the resolution will always match the monitor
+    const framebuffer = try gpa.alloc(u8, output.height * output.width * @sizeOf(u32));
     return ImageResponse{ .Animated = .{ .image = .{
         .durations = durations,
         .framecount = number_of_frames,
         .delta_mmaps = delta_mmaps,
+        .framebuffer = framebuffer,
         .timer_fd = timer_fd,
         .base_frame = base_frame,
         .poolBuffer = poolBuffer.?,
@@ -124,40 +130,29 @@ fn composite_from_delta(
     i: usize,
 ) !void {
     const duration_length = try fbs.reader().readInt(u32, .little);
-    const duration_buffer = try allocator.alloc(u8, duration_length);
-    defer allocator.free(duration_buffer);
+    const duration_buffer = try gpa.alloc(u8, duration_length);
+    defer gpa.free(duration_buffer);
     _ = try fbs.reader().readAll(duration_buffer);
     const duration: f32 = std.mem.bytesToValue(f32, duration_buffer);
     durations[i] = duration;
-
     //read compressed length
-    const original_len = try fbs.reader().readInt(u32, .little);
+    _ = try fbs.reader().readInt(u32, .little); //TODO
     const compressed_len = try fbs.reader().readInt(u32, .little);
-    const compressed_buffer = try allocator.alloc(u8, compressed_len);
-    defer allocator.free(compressed_buffer);
+    const compressed_buffer = try gpa.alloc(u8, compressed_len);
+    defer gpa.free(compressed_buffer);
     _ = try fbs.reader().readAll(compressed_buffer);
-    const decompressed_buffer = try allocator.alloc(u8, original_len);
-    defer allocator.free(decompressed_buffer);
-    const decompressed_size = lz4.LZ4_decompress_safe(
-        @ptrCast(@alignCast(compressed_buffer.ptr)),
-        @ptrCast(@alignCast(decompressed_buffer.ptr)),
-        @intCast(compressed_buffer.len),
-        @intCast(decompressed_buffer.len),
-    );
-
-    const encoded: []u8 = decompressed_buffer[0..@intCast(decompressed_size)];
     const fd = try std.posix.memfd_create("yin-frame-buffer", 0);
     defer std.posix.close(fd);
-    try std.posix.ftruncate(fd, @intCast(encoded.len));
+    try std.posix.ftruncate(fd, @intCast(compressed_buffer.len));
     const data = try std.posix.mmap(
         null,
-        encoded.len,
+        compressed_len,
         std.posix.PROT.READ | std.posix.PROT.WRITE,
         .{ .TYPE = .SHARED },
         fd,
         0,
     );
-    @memcpy(data, encoded);
+    @memcpy(data, compressed_buffer);
     mmaps[i] = data;
 }
 
@@ -170,13 +165,6 @@ pub fn set_timer_milliseconds(_: AnimatedImage, timer_fd: posix.fd_t, duration: 
     };
     try posix.timerfd_settime(timer_fd, .{}, &spec, null);
 }
-pub const AnimationFrame = struct {
-    image: ?*Image = null, //this will get released after a render, so we cannot release it here to prevent double free
-    duration: f32,
-    pub fn deinit(self: *AnimationFrame) void {
-        allocator.destroy(self);
-    }
-};
 
 pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
     const surface = output.wlSurface orelse return;
@@ -187,11 +175,19 @@ pub fn play_frame(self: *AnimatedImage, output: *Output) !void {
             @memcpy(self.poolBuffer.memory_map, self.base_frame);
         },
         else => {
-            const delta_data = self.delta_mmaps[current_frame];
+            const delta_data_compressed = self.delta_mmaps[current_frame];
             const data = self.poolBuffer.memory_map;
             var output_pos: usize = 0;
             const pixel_size = @sizeOf(u32);
             var index: usize = 0;
+            //decompress
+            const decompressed_size = lz4.LZ4_decompress_safe(
+                @ptrCast(@alignCast(delta_data_compressed.ptr)),
+                @ptrCast(@alignCast(self.framebuffer.ptr)),
+                @intCast(delta_data_compressed.len),
+                @intCast(self.framebuffer.len),
+            );
+            const delta_data: []u8 = self.framebuffer[0..@intCast(decompressed_size)];
             // warning: no bounds checking
             while (index < delta_data.len) {
                 const tag = delta_data[index];
