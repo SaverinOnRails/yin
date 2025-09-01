@@ -68,6 +68,7 @@ pub fn init() !void {
             const conn = try server.accept();
             defer conn.stream.close();
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
+            //TODO: find away to run this async so it does not block
             daemon.handleIpcMessage(message, &conn) catch continue;
 
             //expect follow up message

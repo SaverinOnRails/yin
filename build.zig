@@ -80,6 +80,7 @@ pub fn build(b: *std.Build) void {
 
     const lz4 = b.addTranslateC(.{ .root_source_file = b.addWriteFiles().add("./lz4.h",
         \\ #include <lz4.h>
+        \\ #include <lz4hc.h>
     ), .optimize = optimize, .target = target, .link_libc = true });
 
     const ffmpeg = b.addTranslateC(.{

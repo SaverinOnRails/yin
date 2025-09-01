@@ -194,11 +194,12 @@ fn iter(
     const pixel_bytes = std.mem.sliceAsBytes(pixel_data);
     const max_compressed_size = lz4.LZ4_compressBound(@intCast(pixel_bytes.len));
     const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
-    const compressed_size = lz4.LZ4_compress_default(
+    const compressed_size = lz4.LZ4_compress_HC(
         @ptrCast(@alignCast(pixel_bytes.ptr)),
         @ptrCast(@alignCast(compressed_buffer.ptr)),
         @intCast(pixel_bytes.len),
         @intCast(max_compressed_size),
+        9
     );
     defer allocator.free(compressed_buffer);
     //write compressed length
@@ -255,11 +256,12 @@ fn iter_delta(
     try file.writer().writeInt(u32, @intCast(fbs.items.len), .little);
     const max_compressed_size = lz4.LZ4_compressBound(@intCast(fbs.items.len));
     const compressed_buffer = try allocator.alloc(u8, @intCast(max_compressed_size));
-    const compressed_size = lz4.LZ4_compress_default(
+    const compressed_size = lz4.LZ4_compress_HC(
         @ptrCast(@alignCast(fbs.items.ptr)),
         @ptrCast(@alignCast(compressed_buffer.ptr)),
         @intCast(fbs.items.len),
         @intCast(max_compressed_size),
+        9
     );
     //write compressed len
     try file.writer().writeInt(u32, @intCast(compressed_size), .little);
