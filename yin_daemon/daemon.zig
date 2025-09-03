@@ -14,6 +14,9 @@ zwlrLayerShell: ?*zwlr.LayerShellV1 = null,
 Outputs: std.SinglyLinkedList(Output) = .{},
 animations: std.SinglyLinkedList(AnimatedImage) = .{},
 pollfds: std.ArrayList(posix.pollfd) = undefined,
+asyncReadFd: std.posix.fd_t = undefined,
+asyncWriteFd: std.posix.fd_t = undefined,
+ipcBusy: bool = false,
 
 //global allocator
 const allocator = util.allocator;
@@ -32,9 +35,12 @@ pub fn init() !void {
     defer server.deinit();
     const poll_wayland = 0;
     const poll_ipc: comptime_int = 1;
+    const poll_async: comptime_int = 2;
+    const async_pipe = try std.posix.pipe();
+    daemon.asyncReadFd = async_pipe[0];
+    daemon.asyncWriteFd = async_pipe[1];
     daemon.pollfds = std.ArrayList(posix.pollfd).init(allocator);
     defer daemon.pollfds.deinit();
-
     try daemon.pollfds.append(.{
         .fd = daemon.wlDisplay.getFd(),
         .events = posix.POLL.IN,
@@ -45,10 +51,15 @@ pub fn init() !void {
         .events = posix.POLL.IN,
         .revents = 0,
     });
+    try daemon.pollfds.append(.{
+        .fd = async_pipe[0],
+        .events = posix.POLL.IN,
+        .revents = 0,
+    });
     const registry = try daemon.wlDisplay.getRegistry();
     registry.setListener(*Daemon, registryListener, &daemon);
     if (daemon.wlDisplay.roundtrip() != .SUCCESS) die("Roundtrip failed");
-    //ipc
+    var connInstance: std.net.Server.Connection = undefined;
     while (true) {
         {
             const errno = daemon.wlDisplay.flush();
@@ -65,17 +76,36 @@ pub fn init() !void {
             }
         }
         if (daemon.pollfds.items[poll_ipc].revents & posix.POLL.IN != 0) {
+            if (daemon.ipcBusy) continue; //TODO: respond appropriately
             const conn = try server.accept();
-            defer conn.stream.close();
-            const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
-            //TODO: find away to run this async so it does not block
-            daemon.handleIpcMessage(message, &conn) catch continue;
+            connInstance = conn;
+            const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
 
-            //expect follow up message
+            //handle short term request like pause, play or monitor size
+            daemon.handleIpcMessage(message, &conn) catch continue;
             if (message.payload == .MonitorSize) {
-                const follow_up = shared.DeserializeMessage(conn.stream.reader(), allocator) catch continue;
-                daemon.handleIpcMessage(follow_up, &conn) catch continue;
+                //handle long term like image
+                daemon.ipcBusy = true;
+                _ = std.Thread.spawn(.{}, ipcMessageAsync, .{ &daemon, conn }) catch continue;
+            } else {
+                conn.stream.close();
+                connInstance = undefined;
             }
+        }
+        if (daemon.pollfds.items[poll_async].revents & posix.POLL.IN != 0) {
+            var buf: [128]u8 = undefined;
+            const size = std.posix.read(daemon.asyncReadFd, &buf) catch continue;
+            var arraylist = std.ArrayList(u8).init(allocator);
+            defer arraylist.deinit();
+            arraylist.resize(size) catch continue;
+            @memcpy(arraylist.items, buf[0..size]);
+            var fba = std.io.fixedBufferStream(arraylist.items);
+            const message = shared.DeserializeMessage(fba.reader(), allocator) catch continue;
+            //this can now block the event loop as it is safe
+            daemon.handleIpcMessage(message, &connInstance) catch return;
+            daemon.ipcBusy = false;
+            connInstance.stream.close();
+            connInstance = undefined;
         }
         //go through animations
         var it = daemon.animations.first;
@@ -89,6 +119,19 @@ pub fn init() !void {
     }
     _ = daemon.wlDisplay.flush();
 }
+
+// Caching the image at the client side is what takes the most time, it's also another process entirely so is thread safe.
+// We can keep the event loop running and only pause when the client is done and we actually need to load the image
+// This will do for now until i can make this whole thing thread safe
+fn ipcMessageAsync(daemon: *Daemon, conn: std.net.Server.Connection) void {
+    const async_message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
+    var buffer = std.ArrayList(u8).init(allocator);
+    defer buffer.deinit();
+    shared.SerializeMessage(async_message, buffer.writer()) catch return;
+    _ = posix.write(daemon.asyncWriteFd, buffer.items) catch return;
+    // conn.stream.close();
+}
+
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
     daemon.registryEvent(registry, event) catch die("Error in registry");
 }

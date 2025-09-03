@@ -67,7 +67,7 @@ pub fn SerializeMessage(message: Message, writer: std.ArrayList(u8).Writer) !voi
     }
 }
 
-pub fn DeserializeMessage(reader: std.net.Stream.Reader, allocator: std.mem.Allocator) !Message {
+pub fn DeserializeMessage(reader: anytype, allocator: std.mem.Allocator) !Message {
     //read tag
     const tag = try reader.readInt(u8, .little);
     const msg: MessageTags = @enumFromInt(tag);
