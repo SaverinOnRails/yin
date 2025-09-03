@@ -76,8 +76,12 @@ pub fn init() !void {
             }
         }
         if (daemon.pollfds.items[poll_ipc].revents & posix.POLL.IN != 0) {
-            if (daemon.ipcBusy) continue; //TODO: respond appropriately
             const conn = try server.accept();
+            if (daemon.ipcBusy) {
+                _ = conn.stream.writer().writeAll("IPC busy.") catch continue;
+                conn.stream.close();
+                continue;
+            }
             connInstance = conn;
             const message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
 
@@ -124,14 +128,18 @@ pub fn init() !void {
 // We can keep the event loop running and only pause when the client is done and we actually need to load the image
 // This will do for now until i can make this whole thing thread safe
 fn ipcMessageAsync(daemon: *Daemon, conn: std.net.Server.Connection) void {
-    const async_message = shared.DeserializeMessage(conn.stream.reader(), allocator) catch return;
+    daemon.ipcMessageAsyncErr(conn) catch {
+        daemon.ipcBusy = false;
+        conn.stream.close();
+    };
+}
+fn ipcMessageAsyncErr(daemon: *Daemon, conn: std.net.Server.Connection) !void {
+    const async_message = try shared.DeserializeMessage(conn.stream.reader(), allocator);
     var buffer = std.ArrayList(u8).init(allocator);
     defer buffer.deinit();
-    shared.SerializeMessage(async_message, buffer.writer()) catch return;
-    _ = posix.write(daemon.asyncWriteFd, buffer.items) catch return;
-    // conn.stream.close();
+    try shared.SerializeMessage(async_message, buffer.writer());
+    _ = try posix.write(daemon.asyncWriteFd, buffer.items);
 }
-
 fn registryListener(registry: *wl.Registry, event: wl.Registry.Event, daemon: *Daemon) void {
     daemon.registryEvent(registry, event) catch die("Error in registry");
 }
