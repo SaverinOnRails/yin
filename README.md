@@ -14,7 +14,7 @@ Currently, can display many image formats : png, jpeg, gif and even mp4 videos i
 # Build
 Simply clone and run
 ```
-zig build
+zig build --release=fast
 ```
 in the project directory.
 
