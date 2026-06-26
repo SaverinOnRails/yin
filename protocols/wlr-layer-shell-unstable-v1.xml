@@ -58,7 +58,7 @@
       <arg name="surface" type="object" interface="wl_surface"/>
       <arg name="output" type="object" interface="wl_output" allow-null="true"/>
       <arg name="layer" type="uint" enum="layer" summary="layer to add this surface to"/>
-      <arg name="namespace" type="string" summary="namespace for the layer surface"/>
+      <arg name="_namespace" type="string" summary="namespace for the layer surface"/>
     </request>
 
     <enum name="error">
