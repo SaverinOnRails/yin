@@ -30,4 +30,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' , 'daemon/Daemon.cpp' , 'daemon/Daemon.cpp' , 'daemon/Buffer.cpp'  , protos_src],dependencies:wayland_client_dep)
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' , 'daemon/Daemon.cpp' , 'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'shared/IPC.cpp'  , protos_src],dependencies:wayland_client_dep)
+
+executable('yinctl' , ['client/main.cpp' , 'shared/IPC.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp'])

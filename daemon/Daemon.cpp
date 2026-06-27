@@ -1,10 +1,14 @@
 #include "Daemon.hpp"
 #include "daemon/Monitor.hpp"
 #include "fractional-scale-v1-client-protocol.h"
+#include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <cstring>
+#include <iostream>
 #include <memory>
+#include <poll.h>
 #include <stdexcept>
+#include <sys/poll.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 Daemon::Daemon() { initWayland(); }
@@ -73,7 +77,26 @@ void Daemon::ensureGlobals() {
 }
 
 void Daemon::run() {
-  while (wl_display_dispatch(m_waylandDisplay) != -1) {
+  auto ipc = IPC{};
+  ipc.serverCreate();
+  int wl_fd = wl_display_get_fd(m_waylandDisplay);
+  struct pollfd fds[2];
+  fds[0].fd = wl_fd;
+  fds[0].events = POLLIN;
+
+  fds[1].fd = ipc.m_serverFd;
+  fds[1].events = POLLIN;
+  while (true) {
+    {
+      wl_display_flush(m_waylandDisplay);
+    }
+    int _ = poll(fds, 2, -1);
+    if ((fds[0].revents & POLLIN) != 0) {
+      wl_display_dispatch(m_waylandDisplay);
+    }
+    if ((fds[1].revents & POLLIN) != 0) {
+      ipc.serverAccept();
+    }
   }
 }
 

@@ -11,5 +11,4 @@ public:
   size_t m_size;
   u32 m_height;
   u32 m_width;
-
 };

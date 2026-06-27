@@ -3,7 +3,6 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <cassert>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <wayland-client-protocol.h>
