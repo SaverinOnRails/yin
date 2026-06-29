@@ -1,3 +1,4 @@
+#include "../shared/IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstring>
 #include <iostream>
@@ -40,19 +41,27 @@ int main(int argc, char **argv) {
 
 void setWallpaper() {
   u32 width, height;
-  std::cout << "getting montitor dimensions" << std::endl;
   getMonitorDimensions(width, height);
+
+  // cache video
+  std::cout << width << "x" <<  height << std::endl;
+  cacheVideo(args.img_path.value(), width, height);
 }
 
-// get monitor logical size
+// get monitor buffer size
 // will default to first available monitor if not specified
 void getMonitorDimensions(u32 &width, u32 &height) {
   Message message = MonitorSizeMessage{.monitor = args.monitor};
   auto payload = SerializeMessage(message);
   auto len = payload.size();
   ipc.clientWrite(payload.data(), len);
-
   char msg[1024];
-  ipc.clientRead(msg, sizeof(msg));
-  std::cout << msg << std::endl;
+  auto bytes = ipc.clientRead(msg, sizeof(msg));
+  std::string response(msg, bytes);
+  if (response.length() == 0) {
+    throw std::runtime_error("Could not find required monitor");
+  }
+  auto splitPoint = response.find('x');
+  width = std::stoi(response.substr(0, splitPoint));
+  height = std::stoi(response.substr(splitPoint + 1));
 }

@@ -1,10 +1,11 @@
 #include "Daemon.hpp"
+#include "../shared/IPC.hpp"
 #include "daemon/Monitor.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "yinctl.p/viewporter-client-protocol.h"
 #include <cstring>
-#include <iostream>
 #include <memory>
 #include <poll.h>
 #include <stdexcept>
@@ -68,6 +69,10 @@ void Daemon::bindGlobal(struct wl_registry *registry, uint32_t name,
         static_cast<wp_fractional_scale_manager_v1 *>(wl_registry_bind(
             registry, name, &wp_fractional_scale_manager_v1_interface, 1));
   }
+  if (std::strcmp(interface, wp_viewporter_interface.name) == 0) {
+    m_waylandViewporter = static_cast<wp_viewporter *>(
+        wl_registry_bind(registry, name, &wp_viewporter_interface, 1));
+  }
 }
 
 void Daemon::ensureGlobals() {
@@ -95,7 +100,7 @@ void Daemon::run() {
       wl_display_dispatch(m_waylandDisplay);
     }
     if ((fds[1].revents & POLLIN) != 0) {
-      ipc.serverAccept();
+      ipc.serverAccept(*this);
     }
   }
 }
@@ -111,3 +116,4 @@ wp_fractional_scale_manager_v1 *Daemon::getFractionalScaleManager() {
 
 wl_shm *Daemon::getWaylandShm() { return m_waylandSharedMemory; }
 zwlr_layer_shell_v1 *Daemon::getLayerShell() { return m_layerShell; }
+

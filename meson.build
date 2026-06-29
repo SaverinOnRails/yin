@@ -1,9 +1,12 @@
 project('Yin','cpp' ,'c')
 wayland_client_dep = dependency('wayland-client')
-
+avformat = dependency('libavformat')
+avcodec = dependency('libavcodec')
+avutil = dependency('libavutil')
 wayland_scanner = dependency('wayland-scanner', version: '>=1.14.91', native: true)
 wayland_protos = dependency('wayland-protocols', version: '>=1.31')
 wayland_scanner_prog = find_program(wayland_scanner.get_variable('wayland_scanner'), native: true)
+
 
 wayland_scanner_code = generator(
 	wayland_scanner_prog,
@@ -19,7 +22,7 @@ wayland_scanner_client = generator(
 wl_protocol_dir = wayland_protos.get_variable('pkgdatadir')
 client_protocols = [
 	wl_protocol_dir / 'stable/xdg-shell/xdg-shell.xml',
-	# wl_protocol_dir / 'stable/viewporter/viewporter.xml',
+	wl_protocol_dir / 'stable/viewporter/viewporter.xml',
 	# wl_protocol_dir / 'staging/single-pixel-buffer/single-pixel-buffer-v1.xml',
 	wl_protocol_dir / 'staging/fractional-scale/fractional-scale-v1.xml',
 	'protocols/wlr-layer-shell-unstable-v1.xml',
@@ -30,6 +33,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' , 'daemon/Daemon.cpp' , 'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'shared/IPC.cpp'  , protos_src],dependencies:wayland_client_dep)
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'shared/IPC.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' , 'shared/IPC.hpp' , protos_src],dependencies:wayland_client_dep)
 
-executable('yinctl' , ['client/main.cpp' , 'shared/IPC.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp'])
+ executable('yinctl' , ['client/main.cpp' , 'shared/IPC.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp',protos_src] , dependencies:[wayland_client_dep, avcodec,avformat,avutil])

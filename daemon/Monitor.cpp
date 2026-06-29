@@ -2,6 +2,7 @@
 #include "daemon/Buffer.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include "yinctl.p/viewporter-client-protocol.h"
 #include <cassert>
 #include <memory>
 #include <stdexcept>
@@ -98,6 +99,11 @@ void Monitor::createLayerSurface() {
         m_daemon.getFractionalScaleManager(), m_waylandSurface);
     wp_fractional_scale_v1_add_listener(m_fractionalScale,
                                         &fract_scale_listener, this);
+
+    if (m_daemon.getViewporter() != nullptr) {
+      m_viewport = wp_viewporter_get_viewport(m_daemon.getViewporter(),
+                                              m_waylandSurface);
+    }
   }
   m_layerSurface = zwlr_layer_shell_v1_get_layer_surface(
       m_daemon.getLayerShell(), m_waylandSurface, m_waylandOutput,
@@ -116,7 +122,7 @@ void Monitor::createLayerSurface() {
 }
 
 void Monitor::getBufferSize(u32 &width, u32 &height) {
-  if (m_fractScale != 0) {
+  if (m_fractScale != 0 && m_daemon.getViewporter() != nullptr) {
     width = (m_width * m_fractScale + 120 / 2) / 120;
     height = (m_height * m_fractScale + 120 / 2) / 120;
   } else {
@@ -129,9 +135,18 @@ void Monitor::createAndAttachBuffer() {
   if (m_buffer == nullptr) {
     u32 width, height = 0;
     getBufferSize(width, height);
+    m_bufferHeight = height;
+    m_bufferWidth = width;
     m_buffer =
         std::make_unique<Buffer>(height, width, m_daemon.getWaylandShm());
+
     wl_surface_attach(m_waylandSurface, m_buffer.get()->m_waylandBuffer, 0, 0);
+    wl_surface_damage_buffer(m_waylandSurface, 0, 0, width, height);
+    if (m_viewport) {
+      wp_viewport_set_destination(m_viewport, m_width, m_height);
+    } else {
+      wl_surface_set_buffer_scale(m_waylandSurface, m_scale);
+    }
     wl_surface_commit(m_waylandSurface);
   }
 }

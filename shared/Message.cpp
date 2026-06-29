@@ -1,7 +1,10 @@
 #include "shared/utils.hpp"
+#include <cstddef>
+#include <optional>
 #include <stdexcept>
 #include <variant>
 #include <vector>
+// ipc messages
 
 std::vector<u8> SerializeMessage(Message &msg) {
   auto out = std::vector<u8>();
@@ -21,4 +24,19 @@ std::vector<u8> SerializeMessage(Message &msg) {
     }
   }
   return out;
+}
+
+Message DeserializeMessage(char *buf, size_t len) {
+  auto bufReader = BufReader(buf, len);
+  u8 tag = bufReader.read();
+  if (tag == MonitorSize) {
+    auto monitor_name_length = bufReader.read();
+    std::optional<std::string> monitor_name;
+    if (monitor_name_length > 0) {
+      monitor_name = bufReader.readString(monitor_name_length);
+    }
+    return MonitorSizeMessage{.monitor = monitor_name};
+  } else {
+    throw std::runtime_error("Unknown message");
+  }
 }

@@ -1,10 +1,12 @@
+#include "IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstddef>
-#include <iostream>
 #include <stdexcept>
+#include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <variant>
 
 void IPC::clientConnect() {
   const char *SOCKET_PATH = "/tmp/yin";
@@ -21,8 +23,6 @@ void IPC::clientConnect() {
       -1)
     throw std::runtime_error(
         "Could not connect to Ipc socket, is Yin daemon running?");
-  const char hi[3] = "hi";
-  write(m_clientFd, hi, 3);
 }
 
 void IPC::serverCreate() {
@@ -47,22 +47,43 @@ void IPC::serverCreate() {
   }
 }
 
-void IPC::serverAccept() {
+void IPC::serverAccept(Daemon &daemon) {
   int client = accept(m_serverFd, nullptr, nullptr);
   char buffer[1024];
   ssize_t bytes = ::read(client, buffer, sizeof(buffer));
   if (bytes > 0) {
-    std::cout << "recieved " << bytes << "bytes" << std::endl;
+    auto message = DeserializeMessage(buffer, bytes);
+    if (std::holds_alternative<MonitorSizeMessage>(message)) {
+      auto mes = std::get<MonitorSizeMessage>(message);
+
+      if (auto *monitor = daemonFindMonitor(daemon, mes.monitor)) {
+        std::string dimensions = std::to_string(monitor->m_bufferWidth) + "x" +
+                                 std::to_string(monitor->m_bufferHeight);
+
+        write(client, dimensions.data(), dimensions.size());
+      }
+    }
   }
-  const char reply[] = "Understood!";
-  ::write(client, reply, sizeof(reply) - 1);
   close(client);
 }
 
+Monitor *IPC::daemonFindMonitor(Daemon &daemon,
+                                const std::optional<std::string> &monitorName) {
+  if (!monitorName.has_value()) {
+    return daemon.m_monitors.empty() ? nullptr
+                                     : daemon.m_monitors.front().get();
+  }
+
+  for (auto &monitor : daemon.m_monitors) {
+    if (monitor->m_name == *monitorName) {
+      return monitor.get();
+    }
+  }
+  return nullptr;
+}
 void IPC::clientWrite(unsigned char *data, size_t len) {
-    std::cout << "writing " << len << "bytes" << std::endl;
   ::write(m_clientFd, reinterpret_cast<char *>(data), len);
 }
-void IPC::clientRead(char *buffer, size_t len) {
-  ::read(m_clientFd, buffer, len);
+size_t IPC::clientRead(char *buffer, size_t len) {
+  return ::read(m_clientFd, buffer, len);
 }
