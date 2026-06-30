@@ -5,6 +5,7 @@
 #include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "yinctl.p/viewporter-client-protocol.h"
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <poll.h>
@@ -31,10 +32,11 @@ static const struct wl_registry_listener registry_listener = {
 };
 
 void Daemon::initWayland() {
-  m_waylandDisplay = wl_display_connect(nullptr);
+  m_waylandDisplay = wl_display_connect(NULL);
   if (m_waylandDisplay == nullptr) {
     throw std::runtime_error("Could not connect to a Wayland Compositor");
   }
+  createEGL();
   auto wl_registry = wl_display_get_registry(m_waylandDisplay);
   wl_registry_add_listener(wl_registry, &registry_listener, this);
   if (wl_display_roundtrip(m_waylandDisplay) < 0) {
@@ -49,10 +51,10 @@ void Daemon::bindGlobal(struct wl_registry *registry, uint32_t name,
     m_waylandCompositor = static_cast<wl_compositor *>(
         wl_registry_bind(registry, name, &wl_compositor_interface, 4));
   }
-  if (std::strcmp(interface, wl_shm_interface.name) == 0) {
-    m_waylandSharedMemory = static_cast<wl_shm *>(
-        wl_registry_bind(registry, name, &wl_shm_interface, 1));
-  }
+  // if (std::strcmp(interface, wl_shm_interface.name) == 0) {
+  //   m_waylandSharedMemory = static_cast<wl_shm *>(
+  //       wl_registry_bind(registry, name, &wl_shm_interface, 1));
+  // }
   if (std::strcmp(interface, zwlr_layer_shell_v1_interface.name) == 0) {
     m_layerShell = static_cast<zwlr_layer_shell_v1 *>(
         wl_registry_bind(registry, name, &zwlr_layer_shell_v1_interface, 1));
@@ -76,7 +78,7 @@ void Daemon::bindGlobal(struct wl_registry *registry, uint32_t name,
 }
 
 void Daemon::ensureGlobals() {
-  if (!m_layerShell || !m_waylandCompositor || !m_waylandSharedMemory)
+  if (!m_layerShell || !m_waylandCompositor)
     throw std::runtime_error(
         "Compositor does not implement required protocols");
 }
@@ -114,6 +116,57 @@ wp_fractional_scale_manager_v1 *Daemon::getFractionalScaleManager() {
   return m_fractionalScaleManager;
 }
 
-wl_shm *Daemon::getWaylandShm() { return m_waylandSharedMemory; }
+// wl_shm *Daemon::getWaylandShm() { return m_waylandSharedMemory; }
 zwlr_layer_shell_v1 *Daemon::getLayerShell() { return m_layerShell; }
 
+void Daemon::createEGL() {
+  m_eglDisplay =
+      eglGetDisplay(reinterpret_cast<EGLNativeDisplayType>(m_waylandDisplay));
+  if (m_eglDisplay == EGL_NO_DISPLAY) {
+    throw std::runtime_error("eglGetDisplay failed");
+  }
+
+  EGLint major = 0;
+  EGLint minor = 0;
+  if (eglInitialize(m_eglDisplay, &major, &minor) != EGL_TRUE) {
+    throw std::runtime_error("eglInitialize failed");
+  }
+
+  if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+    throw std::runtime_error("eglBindAPI failed");
+  }
+
+  constexpr EGLint kConfigAttributes[] = {
+      EGL_SURFACE_TYPE,
+      EGL_WINDOW_BIT,
+      EGL_RENDERABLE_TYPE,
+      EGL_OPENGL_ES2_BIT,
+      EGL_RED_SIZE,
+      8,
+      EGL_GREEN_SIZE,
+      8,
+      EGL_BLUE_SIZE,
+      8,
+      EGL_ALPHA_SIZE,
+      0,
+      EGL_NONE,
+  };
+
+  constexpr EGLint kContextAttributes[] = {
+      EGL_CONTEXT_CLIENT_VERSION,
+      2,
+      EGL_NONE,
+  };
+  EGLint configCount = 0;
+  if (eglChooseConfig(m_eglDisplay, kConfigAttributes, &m_eglConfig, 1,
+                      &configCount) != EGL_TRUE ||
+      configCount != 1) {
+    throw std::runtime_error("eglChooseConfig failed");
+  }
+
+  m_eglContext = eglCreateContext(m_eglDisplay, m_eglConfig, EGL_NO_CONTEXT,
+                                  kContextAttributes);
+  if (m_eglContext == EGL_NO_CONTEXT) {
+    throw std::runtime_error("eglCreateContext failed");
+  }
+}

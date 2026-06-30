@@ -1,12 +1,15 @@
 #include "daemon/Monitor.hpp"
-#include "daemon/Buffer.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "yinctl.p/viewporter-client-protocol.h"
+#include <EGL/egl.h>
+#include <GL/gl.h>
 #include <cassert>
-#include <memory>
+#include <iostream>
 #include <stdexcept>
 #include <wayland-client-protocol.h>
+#include <wayland-egl-core.h>
+#include <wayland-egl.h>
 
 static void output_done(void *data, struct wl_output *wl_output) {
   auto monitor = static_cast<Monitor *>(data);
@@ -63,7 +66,8 @@ static void layer_surface_configure(void *data,
   monitor->m_height = height;
   monitor->m_width = width;
   zwlr_layer_surface_v1_ack_configure(monitor->getLayerSurface(), serial);
-  monitor->createAndAttachBuffer();
+  monitor->resizeEGL();
+  // monitor->createAndAttachBuffer();
 }
 
 static void layer_surface_closed(void *data,
@@ -121,32 +125,74 @@ void Monitor::createLayerSurface() {
   wl_surface_commit(m_waylandSurface);
 }
 
-void Monitor::getBufferSize(u32 &width, u32 &height) {
+void Monitor::setBufferSize() {
   if (m_fractScale != 0 && m_daemon.getViewporter() != nullptr) {
-    width = (m_width * m_fractScale + 120 / 2) / 120;
-    height = (m_height * m_fractScale + 120 / 2) / 120;
+    m_bufferWidth = (m_width * m_fractScale + 120 / 2) / 120;
+    m_bufferHeight = (m_height * m_fractScale + 120 / 2) / 120;
   } else {
-    width = width * m_scale;
-    height = height * m_scale;
+    m_bufferWidth = m_width * m_scale;
+    m_bufferHeight = m_height * m_scale;
   }
 }
 
-void Monitor::createAndAttachBuffer() {
-  if (m_buffer == nullptr) {
-    u32 width, height = 0;
-    getBufferSize(width, height);
-    m_bufferHeight = height;
-    m_bufferWidth = width;
-    m_buffer =
-        std::make_unique<Buffer>(height, width, m_daemon.getWaylandShm());
+// void Monitor::createAndAttachBuffer() {
+//   u32 width, height = 0;
+//   setBufferSize(width, height);
+//   m_bufferHeight = height;
+//   m_bufferWidth = width;
+//   m_buffer = std::make_unique<Buffer>(height, width,
+//   m_daemon.getWaylandShm());
 
-    wl_surface_attach(m_waylandSurface, m_buffer.get()->m_waylandBuffer, 0, 0);
-    wl_surface_damage_buffer(m_waylandSurface, 0, 0, width, height);
-    if (m_viewport) {
-      wp_viewport_set_destination(m_viewport, m_width, m_height);
-    } else {
-      wl_surface_set_buffer_scale(m_waylandSurface, m_scale);
+//   wl_surface_attach(m_waylandSurface, m_buffer.get()->m_waylandBuffer, 0, 0);
+//   wl_surface_damage_buffer(m_waylandSurface, 0, 0, width, height);
+//   if (m_viewport) {
+//     wp_viewport_set_destination(m_viewport, m_width, m_height);
+//   } else {
+//     wl_surface_set_buffer_scale(m_waylandSurface, m_scale);
+//   }
+//   wl_surface_commit(m_waylandSurface);
+// }
+
+void Monitor::resizeEGL() {
+  setBufferSize();
+  if (m_daemon.m_eglDisplay == EGL_NO_DISPLAY || m_daemon.m_eglContext == EGL_NO_CONTEXT) {
+    throw std::runtime_error("OpenGL renderer is not bound");
+  }
+  if (m_eglWindow == nullptr) {
+    m_eglWindow =
+        wl_egl_window_create(m_waylandSurface, static_cast<int>(m_bufferWidth),
+                             static_cast<int>(m_bufferHeight));
+    if (m_eglWindow == nullptr) {
+      throw std::runtime_error("wl_egl_window_create failed");
     }
-    wl_surface_commit(m_waylandSurface);
+  } else {
+    wl_egl_window_resize(m_eglWindow, static_cast<int>(m_bufferWidth),
+                         static_cast<int>(m_bufferHeight), 0, 0);
+  }
+
+  if (m_eglSurface == EGL_NO_SURFACE) {
+    m_eglSurface = eglCreateWindowSurface(
+        m_daemon.m_eglDisplay, m_daemon.m_eglConfig,
+        reinterpret_cast<EGLNativeWindowType>(m_eglWindow), nullptr);
+    if (m_eglSurface == EGL_NO_SURFACE) {
+      throw std::runtime_error("eglCreateWindowSurface failed");
+    }
+  }
+
+  if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface, m_daemon.m_eglContext) !=
+      EGL_TRUE) {
+    throw std::runtime_error("eglMakeCurrent failed during resize");
+  }
+
+  glViewport(0, 0, static_cast<GLint>(m_bufferWidth),
+             static_cast<GLint>(m_bufferHeight));
+  glEnable(GL_BLEND);
+  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+  glClearColor(1.0f, 0.5f, 0.0f, 0.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    throw std::runtime_error("eglSwapBuffers failed");
   }
 }
