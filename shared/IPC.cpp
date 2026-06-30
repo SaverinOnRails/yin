@@ -1,6 +1,7 @@
 #include "IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstddef>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -52,6 +53,7 @@ void IPC::serverAccept(Daemon &daemon) {
   char buffer[1024];
   ssize_t bytes = ::read(client, buffer, sizeof(buffer));
   if (bytes > 0) {
+    std::cout << "recieved " << bytes << " bytes" << std::endl;
     auto message = DeserializeMessage(buffer, bytes);
     if (std::holds_alternative<MonitorSizeMessage>(message)) {
       auto mes = std::get<MonitorSizeMessage>(message);
@@ -62,6 +64,9 @@ void IPC::serverAccept(Daemon &daemon) {
 
         write(client, dimensions.data(), dimensions.size());
       }
+    } else if (std::holds_alternative<SetWallpaperMessage>(message)) {
+      auto mes = std::get<SetWallpaperMessage>(message);
+      std::cout << "request to set to" << mes.imgPath << std::endl;
     }
   }
   close(client);

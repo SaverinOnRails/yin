@@ -1,6 +1,7 @@
 #include "../shared/IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <optional>
 #include <stdexcept>
@@ -39,13 +40,39 @@ int main(int argc, char **argv) {
   }
 }
 
+std::string getCachePath(std::string_view path) {
+  std::filesystem::path full_path = path;
+  auto name = full_path.filename();
+
+  const char *home = std::getenv("HOME");
+  if (!home)
+    throw std::runtime_error("HOME environment variable not set");
+
+  std::filesystem::path cache_dir =
+      std::filesystem::path(home) / ".cache" / "yin";
+
+  std::filesystem::create_directories(cache_dir);
+  return cache_dir / name;
+}
+
 void setWallpaper() {
   u32 width, height;
   getMonitorDimensions(width, height);
 
   // cache video
-  std::cout << width << "x" <<  height << std::endl;
-  cacheVideo(args.img_path.value(), width, height);
+  auto cachePath = getCachePath(args.img_path.value());
+  if (!std::filesystem::exists(cachePath)) {
+    std::cout << "Resizing video to" << width << "x" << height << std::endl;
+    cacheVideo(args.img_path.value(), cachePath, width, height);
+    std::cout << "written to " << cachePath << std::endl;
+  }
+  Message message =
+      SetWallpaperMessage{.monitor = args.monitor, .imgPath = cachePath};
+  auto payload = SerializeMessage(message);
+  
+  //reset connection for fresh message
+  ipc.clientConnect();
+  ipc.clientWrite(payload.data(), payload.size());
 }
 
 // get monitor buffer size
