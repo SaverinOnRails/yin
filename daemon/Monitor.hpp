@@ -1,6 +1,7 @@
 #pragma once
 #include "daemon/Buffer.hpp"
 #include "daemon/Daemon.hpp"
+#include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "shared/utils.hpp"
 #include "viewporter-client-protocol.h"
@@ -29,7 +30,10 @@ public:
   std::string m_name;
   void resizeEGL();
   void createAndAttachBuffer();
+  std::chrono::steady_clock::time_point m_nextVideoFrame;
   std::unique_ptr<Buffer> m_buffer;
+  WallpaperBindError setWallpaper(std::string img_path);
+  void onFrame();
 
 private:
   wl_surface *m_waylandSurface;
@@ -41,5 +45,8 @@ private:
   u32 m_waylandName;
   wl_egl_window *m_eglWindow = nullptr;
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
+  std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
+  void nextFrame();
   void setBufferSize();
+  void render();
 };

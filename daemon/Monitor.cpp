@@ -1,11 +1,14 @@
 #include "daemon/Monitor.hpp"
+#include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "yinctl.p/viewporter-client-protocol.h"
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <cassert>
+#include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
@@ -47,6 +50,16 @@ static const struct wl_output_listener output_listener = {
     .scale = output_scale,
     .name = output_name,
     .description = output_description,
+};
+
+static void frame_done(void *data, wl_callback *callback, uint32_t) {
+  auto *monitor = static_cast<Monitor *>(data);
+  wl_callback_destroy(callback);
+  monitor->onFrame();
+}
+
+static const struct wl_callback_listener frame_listener = {
+    .done = frame_done,
 };
 
 static void fract_preferred_scale(void *data, struct wp_fractional_scale_v1 *f,
@@ -155,7 +168,8 @@ void Monitor::setBufferSize() {
 
 void Monitor::resizeEGL() {
   setBufferSize();
-  if (m_daemon.m_eglDisplay == EGL_NO_DISPLAY || m_daemon.m_eglContext == EGL_NO_CONTEXT) {
+  if (m_daemon.m_eglDisplay == EGL_NO_DISPLAY ||
+      m_daemon.m_eglContext == EGL_NO_CONTEXT) {
     throw std::runtime_error("OpenGL renderer is not bound");
   }
   if (m_eglWindow == nullptr) {
@@ -179,8 +193,17 @@ void Monitor::resizeEGL() {
     }
   }
 
-  if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface, m_daemon.m_eglContext) !=
-      EGL_TRUE) {
+  if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
+                     m_daemon.m_eglContext) != EGL_TRUE) {
+    throw std::runtime_error("eglMakeCurrent failed during resize");
+  }
+  render();
+}
+
+void Monitor::render() {
+
+  if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
+                     m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
 
@@ -189,10 +212,36 @@ void Monitor::resizeEGL() {
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-  glClearColor(1.0f, 0.5f, 0.0f, 0.0f);
+  glClearColor((float)rand() / (float)RAND_MAX, 0.5f, 0.3f, 0.0f);
   glClear(GL_COLOR_BUFFER_BIT);
 
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
     throw std::runtime_error("eglSwapBuffers failed");
   }
+}
+
+WallpaperBindError Monitor::setWallpaper(std::string img_path) {
+  m_wallpaper = std::make_unique<Wallpaper>();
+  auto error = m_wallpaper->bind(img_path);
+  if (error == Success) {
+    m_nextVideoFrame = std::chrono::steady_clock::now();
+    nextFrame();
+  }
+  return error;
+}
+
+void Monitor::nextFrame() {
+  auto *cb = wl_surface_frame(m_waylandSurface);
+  wl_callback_add_listener(cb, &frame_listener, this);
+  wl_surface_commit(m_waylandSurface);
+}
+
+void Monitor::onFrame() {
+  auto now = std::chrono::steady_clock::now();
+  if (now >= m_nextVideoFrame && m_wallpaper != nullptr) {
+    m_nextVideoFrame += m_wallpaper->m_frameDuration;
+    render();
+  }
+  nextFrame();
 }

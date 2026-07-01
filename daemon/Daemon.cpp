@@ -170,3 +170,4 @@ void Daemon::createEGL() {
     throw std::runtime_error("eglCreateContext failed");
   }
 }
+

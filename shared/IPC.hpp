@@ -1,9 +1,10 @@
 #pragma once
-#include "../daemon/Daemon.hpp"
+#include "daemon/Monitor.hpp"
 #include <cstddef>
 #include <optional>
 #include <string>
 class Daemon;
+class Monitor;
 class IPC {
 public:
   void clientConnect();

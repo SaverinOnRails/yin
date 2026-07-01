@@ -5,6 +5,7 @@
 #include <iostream>
 #include <optional>
 #include <stdexcept>
+#include <string>
 
 void setWallpaper();
 void getMonitorDimensions(u32 &width, u32 &height);
@@ -40,9 +41,12 @@ int main(int argc, char **argv) {
   }
 }
 
-std::string getCachePath(std::string_view path) {
-  std::filesystem::path full_path = path;
-  auto name = full_path.filename();
+std::string getCachePath(u32 width, u32 height, const std::string &path) {
+  std::filesystem::path input_path(path);
+
+  std::string cache_name = std::to_string(width) + "x" +
+                           std::to_string(height) + "_" +
+                           input_path.filename().string();
 
   const char *home = std::getenv("HOME");
   if (!home)
@@ -52,27 +56,30 @@ std::string getCachePath(std::string_view path) {
       std::filesystem::path(home) / ".cache" / "yin";
 
   std::filesystem::create_directories(cache_dir);
-  return cache_dir / name;
-}
 
+  return (cache_dir / cache_name).string();
+}
 void setWallpaper() {
   u32 width, height;
   getMonitorDimensions(width, height);
 
   // cache video
-  auto cachePath = getCachePath(args.img_path.value());
+  auto cachePath = getCachePath(width, height, args.img_path.value());
   if (!std::filesystem::exists(cachePath)) {
-    std::cout << "Resizing video to" << width << "x" << height << std::endl;
     cacheVideo(args.img_path.value(), cachePath, width, height);
-    std::cout << "written to " << cachePath << std::endl;
   }
   Message message =
       SetWallpaperMessage{.monitor = args.monitor, .imgPath = cachePath};
   auto payload = SerializeMessage(message);
-  
-  //reset connection for fresh message
+
+  // reset connection for fresh message
   ipc.clientConnect();
   ipc.clientWrite(payload.data(), payload.size());
+
+  char msg[1024];
+  auto bytes = ipc.clientRead(msg, sizeof(msg));
+  std::string response(msg, bytes);
+  std::cout << response << std::endl;
 }
 
 // get monitor buffer size

@@ -1,7 +1,9 @@
 #include "IPC.hpp"
+#include "daemon/Monitor.hpp"
+#include "daemon/Wallpaper.hpp"
 #include "shared/utils.hpp"
 #include <cstddef>
-#include <iostream>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -9,6 +11,7 @@
 #include <unistd.h>
 #include <variant>
 
+class Monitor;
 void IPC::clientConnect() {
   const char *SOCKET_PATH = "/tmp/yin";
   m_clientFd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -53,7 +56,6 @@ void IPC::serverAccept(Daemon &daemon) {
   char buffer[1024];
   ssize_t bytes = ::read(client, buffer, sizeof(buffer));
   if (bytes > 0) {
-    std::cout << "recieved " << bytes << " bytes" << std::endl;
     auto message = DeserializeMessage(buffer, bytes);
     if (std::holds_alternative<MonitorSizeMessage>(message)) {
       auto mes = std::get<MonitorSizeMessage>(message);
@@ -66,7 +68,28 @@ void IPC::serverAccept(Daemon &daemon) {
       }
     } else if (std::holds_alternative<SetWallpaperMessage>(message)) {
       auto mes = std::get<SetWallpaperMessage>(message);
-      std::cout << "request to set to" << mes.imgPath << std::endl;
+      auto monitor = daemonFindMonitor(daemon, mes.monitor);
+
+// cheap hack to satisy linker
+#ifdef YIN_DAEMON
+      auto error = monitor->setWallpaper(mes.imgPath);
+      char bad_video_message[] =
+          "Problem with video file, please delete ~/cache/yin and try again";
+      char no_hardware_decoding[] =
+          "Hardware decoding is unavailable, cannot proceed"; // maybe we can,
+                                                              // we'll find out
+      char success_message[] = "Img sent to daemon!";
+
+      if (error == BadVideo) {
+        write(client, bad_video_message, std::strlen(bad_video_message));
+      }
+      if (error == NoHarwareDecoding) {
+        write(client, no_hardware_decoding, std::strlen(no_hardware_decoding));
+      }
+      if (error == Success) {
+        write(client, success_message, std::strlen(success_message));
+      }
+#endif
     }
   }
   close(client);

@@ -73,4 +73,4 @@ std::vector<u8> SerializeMessage(Message &msg);
 Message DeserializeMessage(char *buf, size_t len);
 void cacheVideo(std::string_view filepath, std::string_view write_to, u32 width,
                 u32 height);
-std::string getCachePath(std::string_view path);
+std::string getCachePath(u32 width, u32 height , std::string_view path);
