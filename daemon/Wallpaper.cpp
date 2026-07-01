@@ -51,3 +51,46 @@ WallpaperBindError Wallpaper::bind(std::string_view path) {
   }
   return Success;
 }
+
+//thank you Claude
+bool Wallpaper::decodeNextFrame() {
+  int ret;
+
+  while (true) {
+    ret = avcodec_receive_frame(m_codecContext, m_frame);
+    if (ret == 0) {
+      return true; // got a frame
+    }
+    if (ret != AVERROR(EAGAIN)) {
+      if (ret == AVERROR_EOF) {
+        // loop: seek back to start and flush decoder state
+        av_seek_frame(m_formatContext, m_videoStream, 0, AVSEEK_FLAG_BACKWARD);
+        avcodec_flush_buffers(m_codecContext);
+        continue; // try receiving again after flush (will hit EAGAIN, fall
+                  // through to read)
+      }
+      return false; // real decode error
+    }
+
+    // EAGAIN: decoder wants more input
+    av_packet_unref(m_packet);
+    int readRet = av_read_frame(m_formatContext, m_packet);
+    if (readRet < 0) {
+      // EOF on demuxer side, flush decoder to drain remaining frames, then loop
+      avcodec_send_packet(m_codecContext, nullptr);
+      continue;
+    }
+
+    if (m_packet->stream_index != m_videoStream) {
+      av_packet_unref(m_packet);
+      continue;
+    }
+
+    ret = avcodec_send_packet(m_codecContext, m_packet);
+    av_packet_unref(m_packet);
+    if (ret < 0 && ret != AVERROR(EAGAIN)) {
+      return false;
+    }
+    // loop back to receive_frame
+  }
+}

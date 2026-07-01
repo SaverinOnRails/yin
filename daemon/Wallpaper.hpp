@@ -12,7 +12,9 @@ enum WallpaperBindError : u8 { Success, BadVideo, NoHarwareDecoding };
 
 class Wallpaper {
 public:
-  std::chrono::nanoseconds m_frameDuration = std::chrono::milliseconds(16); //assume 60fps
+  std::chrono::nanoseconds m_frameDuration =
+      std::chrono::milliseconds(16); // assume 60fps
+  bool decodeNextFrame();
 
 public:
   WallpaperBindError bind(std::string_view img_path);

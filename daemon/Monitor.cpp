@@ -197,7 +197,10 @@ void Monitor::resizeEGL() {
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
-  render();
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
+    throw std::runtime_error("eglSwapBuffers failed");
+  }
 }
 
 void Monitor::render() {
@@ -207,13 +210,17 @@ void Monitor::render() {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
 
-  glViewport(0, 0, static_cast<GLint>(m_bufferWidth),
-             static_cast<GLint>(m_bufferHeight));
-  glEnable(GL_BLEND);
-  glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+  // glViewport(0, 0, static_cast<GLint>(m_bufferWidth),
+  //            static_cast<GLint>(m_bufferHeight));
+  // glEnable(GL_BLEND);
+  // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-  glClearColor((float)rand() / (float)RAND_MAX, 0.5f, 0.3f, 0.0f);
-  glClear(GL_COLOR_BUFFER_BIT);
+  // glClearColor((float)rand() / (float)RAND_MAX, 0.5f, 0.3f, 0.0f);
+  // glClear(GL_COLOR_BUFFER_BIT);
+
+  if (!m_wallpaper->decodeNextFrame()) {
+    return; // decode failed/no frame this tick, skip render
+  }
 
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
     std::cout << eglGetError() << std::endl;
