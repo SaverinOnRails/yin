@@ -7,6 +7,7 @@
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <EGL/egl.h>
+#include <GLES2/gl2.h>
 #include <memory>
 #include <string>
 #include <wayland-client-protocol.h>
@@ -33,6 +34,7 @@ public:
   std::chrono::steady_clock::time_point m_nextVideoFrame;
   std::unique_ptr<Buffer> m_buffer;
   WallpaperBindError setWallpaper(std::string img_path);
+  void setupGlShaders();
   void onFrame();
 
 private:
@@ -48,5 +50,6 @@ private:
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
   void setBufferSize();
+  GLuint m_textures[2];
   void render();
 };

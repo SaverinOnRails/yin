@@ -1,10 +1,16 @@
 #pragma once
 #include "daemon/Monitor.hpp"
-#include <EGL/egl.h>
 #include "fractional-scale-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GL/gl.h>
+#include <GL/glext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
 #include <memory>
+#include <va/va.h>
 #include <vector>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
@@ -29,10 +35,16 @@ public:
   EGLConfig m_eglConfig = nullptr;
   EGLContext m_eglContext = EGL_NO_CONTEXT;
   std::vector<std::unique_ptr<Monitor>> m_monitors;
+  VADisplay m_vaDisplay;
+  PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR = nullptr;
+  PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = nullptr;
+  PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = nullptr;
+  PFNGLGENVERTEXARRAYSPROC glGenVertexArrays = nullptr;
+  PFNGLBINDVERTEXARRAYPROC glBindVertexArrays = nullptr;
 
 private:
   wl_compositor *m_waylandCompositor;
-  // wl_shm *m_waylandSharedMemory;
+  // wl_shm *m_waylandSharedMemory; we dont need this anymore for now
   wp_viewporter *m_waylandViewporter;
   zwlr_layer_shell_v1 *m_layerShell;
   wp_fractional_scale_manager_v1 *m_fractionalScaleManager;

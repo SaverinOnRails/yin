@@ -5,12 +5,14 @@
 #include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include "yinctl.p/viewporter-client-protocol.h"
+#include <cassert>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <poll.h>
 #include <stdexcept>
 #include <sys/poll.h>
+#include <va/va_wayland.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
 Daemon::Daemon() { initWayland(); }
@@ -37,10 +39,16 @@ void Daemon::initWayland() {
     throw std::runtime_error("Could not connect to a Wayland Compositor");
   }
   createEGL();
+  m_vaDisplay = vaGetDisplayWl(m_waylandDisplay);
+  assert(m_vaDisplay != nullptr);
+  int major, minor;
   auto wl_registry = wl_display_get_registry(m_waylandDisplay);
   wl_registry_add_listener(wl_registry, &registry_listener, this);
   if (wl_display_roundtrip(m_waylandDisplay) < 0) {
     throw std::runtime_error("Failed to roundtrip wayland display");
+  }
+  if (vaInitialize(m_vaDisplay, &major, &minor) != VA_STATUS_SUCCESS) {
+    throw std::runtime_error("Failed to init VA display");
   }
   ensureGlobals();
 }
@@ -132,7 +140,7 @@ void Daemon::createEGL() {
     throw std::runtime_error("eglInitialize failed");
   }
 
-  if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+  if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) {
     throw std::runtime_error("eglBindAPI failed");
   }
 
@@ -169,5 +177,17 @@ void Daemon::createEGL() {
   if (m_eglContext == EGL_NO_CONTEXT) {
     throw std::runtime_error("eglCreateContext failed");
   }
-}
 
+  eglCreateImageKHR = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
+      eglGetProcAddress("eglCreateImageKHR"));
+  eglDestroyImageKHR = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
+      eglGetProcAddress("eglDestroyImageKHR"));
+  glEGLImageTargetTexture2DOES =
+      reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
+          eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+
+if (!eglCreateImageKHR || !eglDestroyImageKHR || !glEGLImageTargetTexture2DOES) {
+    throw std::runtime_error(
+        "missing EGL_KHR_image_base / EGL_EXT_image_dma_buf_import / "
+        "GL_OES_EGL_image_external support");
+}}

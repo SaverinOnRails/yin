@@ -6,10 +6,14 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <cassert>
-#include <cstdlib>
+#include <cstdint>
+#include <drm/drm_fourcc.h>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <va/va.h>
+#include <va/va_drm.h>
+#include <va/va_drmcommon.h>
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
@@ -80,6 +84,7 @@ static void layer_surface_configure(void *data,
   monitor->m_width = width;
   zwlr_layer_surface_v1_ack_configure(monitor->getLayerSurface(), serial);
   monitor->resizeEGL();
+  monitor->setupGlShaders();
   // monitor->createAndAttachBuffer();
 }
 
@@ -207,21 +212,92 @@ void Monitor::render() {
 
   if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
                      m_daemon.m_eglContext) != EGL_TRUE) {
-    throw std::runtime_error("eglMakeCurrent failed during resize");
+    throw std::runtime_error("eglMakeCurrent failed ");
+  }
+  if (!m_wallpaper->decodeNextFrame())
+    return;
+  std::cout << "Attempting to render" << std::endl;
+  VASurfaceID va_surface = (uintptr_t)m_wallpaper->m_frame->data[3];
+
+  VADRMPRIMESurfaceDescriptor prime;
+  if (vaExportSurfaceHandle(m_daemon.m_vaDisplay, va_surface,
+                            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
+                            VA_EXPORT_SURFACE_READ_ONLY |
+                                VA_EXPORT_SURFACE_SEPARATE_LAYERS,
+                            &prime) != VA_STATUS_SUCCESS) {
+    std::cout << "vaExportSurfaceHandle failed";
+  }
+  if (prime.fourcc != VA_FOURCC_NV12) {
+    std::cout << "export format check failed";
+    ; // we only support NV12 here
+  }
+  vaSyncSurface(m_daemon.m_vaDisplay, va_surface);
+  float texcoord_x1 = 1.0f, texcoord_y1 = 1.0f;
+  bool texture_size_valid = false;
+  if (!texture_size_valid) {
+    texcoord_x1 = (float)((double)m_wallpaper->m_codecContext->width /
+                          (double)prime.width);
+    texcoord_y1 = (float)((double)m_wallpaper->m_codecContext->height /
+                          (double)prime.height);
+    texture_size_valid = true;
+  }
+  EGLImage images[2];
+  for (int i = 0; i < 2; ++i) {
+    static const uint32_t formats[2] = {DRM_FORMAT_R8, DRM_FORMAT_GR88};
+#define LAYER i
+#define PLANE 0
+    if (prime.layers[i].drm_format != formats[i]) {
+      throw std::runtime_error("expected DRM format check");
+    }
+    EGLint img_attr[] = {
+        EGL_LINUX_DRM_FOURCC_EXT,
+        static_cast<EGLint>(formats[i]),
+        EGL_WIDTH,
+        static_cast<EGLint>(prime.width / (i + 1)), // half size
+        EGL_HEIGHT,
+        static_cast<EGLint>(prime.height / (i + 1)), // for chroma
+        EGL_DMA_BUF_PLANE0_FD_EXT,
+        prime.objects[prime.layers[LAYER].object_index[PLANE]].fd,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+        static_cast<EGLint>(prime.layers[LAYER].offset[PLANE]),
+        EGL_DMA_BUF_PLANE0_PITCH_EXT,
+        static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE]),
+        EGL_NONE};
+    images[i] =
+        m_daemon.eglCreateImageKHR(m_daemon.m_eglDisplay, EGL_NO_CONTEXT,
+                                   EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
+    if (!images[i]) {
+      throw std::runtime_error(i ? "chroma eglCreateImageKHR"
+                                 : "luma eglCreateImageKHR");
+    }
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, m_textures[i]);
+    while (glGetError()) {
+    }
+    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
+    if (glGetError()) {
+      throw std::runtime_error("glEGLImageTargetTexture2DOES");
+    }
   }
 
-  // glViewport(0, 0, static_cast<GLint>(m_bufferWidth),
-  //            static_cast<GLint>(m_bufferHeight));
-  // glEnable(GL_BLEND);
-  // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-  // glClearColor((float)rand() / (float)RAND_MAX, 0.5f, 0.3f, 0.0f);
-  // glClear(GL_COLOR_BUFFER_BIT);
-
-  if (!m_wallpaper->decodeNextFrame()) {
-    return; // decode failed/no frame this tick, skip render
+  // draw the frame
+  glClear(GL_COLOR_BUFFER_BIT);
+  while (glGetError()) {
   }
-
+  glActiveTexture(GL_TEXTURE0);
+  glBegin(GL_QUADS);
+  glTexCoord2f(0.0f, 0.0f);
+  glVertex2i(0, 0);
+  glTexCoord2f(texcoord_x1, 0.0f);
+  glVertex2i(1, 0);
+  glTexCoord2f(texcoord_x1, texcoord_y1);
+  glVertex2i(1, 1);
+  glTexCoord2f(0.0f, texcoord_y1);
+  glVertex2i(0, 1);
+  glEnd();
+  if (glGetError()) {
+    throw std::runtime_error("drawing");
+  }
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
     std::cout << eglGetError() << std::endl;
     throw std::runtime_error("eglSwapBuffers failed");
@@ -230,10 +306,13 @@ void Monitor::render() {
 
 WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
-  auto error = m_wallpaper->bind(img_path);
+  auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
+    // start playback
     nextFrame();
+  } else {
+    m_wallpaper = nullptr;
   }
   return error;
 }
@@ -251,4 +330,86 @@ void Monitor::onFrame() {
     render();
   }
   nextFrame();
+}
+
+// https://gist.github.com/kajott/d1b29c613be30893c855621edd1f212e
+
+#define DECLARE_YUV2RGB_MATRIX_GLSL                                            \
+  "const mat4 yuv2rgb = mat4(\n"                                               \
+  "    vec4(  1.1644,  1.1644,  1.1644,  0.0000 ),\n"                          \
+  "    vec4(  0.0000, -0.2132,  2.1124,  0.0000 ),\n"                          \
+  "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n"                          \
+  "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
+
+void Monitor::setupGlShaders() {
+  std::cout << "Setting up gl shaders" << std::endl;
+  if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
+                     m_daemon.m_eglContext) != EGL_TRUE) {
+    throw std::runtime_error("eglMakeCurrent failed during resize");
+  }
+  // glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0);
+  const char *vs_src = "void main() {"
+                       "\n"
+                       "    gl_Position = ftransform();"
+                       "\n"
+                       "    gl_TexCoord[0] = gl_MultiTexCoord0;"
+                       "\n"
+                       "}";
+  const char *fs_src = "uniform sampler2D uTexY, uTexC;"
+                       "\n" DECLARE_YUV2RGB_MATRIX_GLSL "\n"
+                       "void main() {"
+                       "\n"
+                       "    gl_FragColor = yuv2rgb * vec4(texture2D(uTexY, "
+                       "gl_TexCoord[0].xy).x, "
+                       "texture2D(uTexC, gl_TexCoord[0].xy).xy, 1.);"
+                       "\n"
+                       "}";
+  GLuint prog = glCreateProgram();
+  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
+  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+  if (!prog) {
+    throw std::runtime_error("glCreateProgram failed");
+  }
+  if (!vs || !fs) {
+    throw std::runtime_error("glCreateShader");
+  }
+  glShaderSource(vs, 1, &vs_src, NULL);
+  glShaderSource(fs, 1, &fs_src, NULL);
+  GLint ok;
+  while (glGetError()) {
+  }
+  glCompileShader(vs);
+  glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
+  if (glGetError() || (ok != GL_TRUE)) {
+    throw std::runtime_error("glCompileShader(GL_VERTEX_SHADER)");
+  }
+  glCompileShader(fs);
+  glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
+  if (glGetError() || (ok != GL_TRUE)) {
+    throw std::runtime_error("glCompileShader(GL_FRAGMENT_SHADER)");
+  }
+  glAttachShader(prog, vs);
+  glAttachShader(prog, fs);
+  glLinkProgram(prog);
+  if (glGetError()) {
+    throw std::runtime_error("glLinkProgram");
+  }
+  glUseProgram(prog);
+  glUniform1i(glGetUniformLocation(prog, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(prog, "uTexC"), 1);
+
+  // OpenGL texture setup
+  glGenTextures(2, m_textures);
+  for (int i = 0; i < 2; ++i) {
+    glBindTexture(GL_TEXTURE_2D, m_textures[i]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  }
+  glBindTexture(GL_TEXTURE_2D, 0);
+
+  // initial window size setup
+  GLint vp[4];
+  glGetIntegerv(GL_VIEWPORT, vp);
 }
