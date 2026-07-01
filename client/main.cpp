@@ -8,10 +8,12 @@
 #include <string>
 
 void setWallpaper();
+void PlayPauseWallpaper(bool play);
 void getMonitorDimensions(u32 &width, u32 &height);
 struct Arguments {
   std::optional<std::string> img_path;
   std::optional<std::string> monitor;
+  bool play;
 };
 
 Arguments args = Arguments{};
@@ -29,6 +31,12 @@ void process_args(int argc, char **argv) {
         throw std::runtime_error("Output not specified");
       args.monitor = argv[i + 1];
     }
+    if (std::strcmp(argv[i], "--pause") == 0) {
+      args.play = false;
+    }
+    if (std::strcmp(argv[i], "--play") == 0) {
+      args.play = true;
+    }
   }
 }
 
@@ -38,9 +46,22 @@ int main(int argc, char **argv) {
 
   if (args.img_path.has_value()) {
     setWallpaper();
+  } else if (args.play == false || args.play == true) {
+    PlayPauseWallpaper(args.play);
   }
 }
 
+void PlayPauseWallpaper(bool play) {
+  // get monitor dimensions is convenient for checking if the monitor supplied
+  // exists or is correct so we're just gonna call it
+  u32 width, height;
+  getMonitorDimensions(width, height);
+  Message message = PlayPauseMessage{.monitor = args.monitor ,.play = play};
+  // reset connection for fresh message
+  auto payload = SerializeMessage(message);
+  ipc.clientConnect();
+  ipc.clientWrite(payload.data(), payload.size());
+}
 std::string getCachePath(u32 width, u32 height, const std::string &path) {
   std::filesystem::path input_path(path);
 

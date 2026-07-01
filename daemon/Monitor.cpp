@@ -331,6 +331,7 @@ void Monitor::render() {
 
 WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
+  m_wallpaperPlaying = true;
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
@@ -354,6 +355,9 @@ void Monitor::onFrame() {
     m_nextVideoFrame += m_wallpaper->m_frameDuration;
     render();
   }
+  // don't render again if we have a single image
+  if (m_wallpaper->m_isSingleFrame || m_wallpaperPlaying == false)
+    return;
   nextFrame();
 }
 
@@ -461,4 +465,12 @@ void Monitor::setupGlShaders() {
   GLint vp[4];
   glGetIntegerv(GL_VIEWPORT, vp);
   m_shadersSetup = true;
+}
+void Monitor::setPlayPause(bool play) {
+  if (play && !m_wallpaperPlaying) {
+    m_nextVideoFrame =
+        std::chrono::steady_clock::now() + m_wallpaper->m_frameDuration;
+    nextFrame();
+  }
+  m_wallpaperPlaying = play;
 }

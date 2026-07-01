@@ -1,9 +1,12 @@
 #include "daemon/Wallpaper.hpp"
+#include <chrono>
+#include <iostream>
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/rational.h>
 #include <va/va.h>
 
 static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
@@ -26,6 +29,8 @@ WallpaperBindError Wallpaper::bind(std::string_view path,
   m_videoStream = av_find_best_stream(m_formatContext, AVMEDIA_TYPE_VIDEO, -1,
                                       -1, &m_codec, 0);
 
+  // check if this is a static image that won't be decoded on GPU
+
   if (m_videoStream < 0)
     return BadVideo;
 
@@ -37,6 +42,18 @@ WallpaperBindError Wallpaper::bind(std::string_view path,
           m_codecContext, m_formatContext->streams[m_videoStream]->codecpar) <
       0)
     return BadVideo;
+  double fps = av_q2d(m_formatContext->streams[m_videoStream]->avg_frame_rate);
+  if (fps <= 0.0)
+    fps = 30.0;
+
+  m_frameDuration =
+      std::chrono::milliseconds(static_cast<int64_t>(1000.0 / fps));
+  int64_t frameCount = m_formatContext->streams[m_videoStream]->nb_frames;
+
+  // check if is static image that won't be decoded on GPU
+  if (frameCount == 1 || frameCount == 0) {
+    m_isSingleFrame = true;
+  }
 
   // Allocate hardware device context
   m_hwDeviceContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
@@ -57,7 +74,6 @@ WallpaperBindError Wallpaper::bind(std::string_view path,
   if (!m_codecContext->hw_device_ctx)
     return NoHarwareDecoding;
 
-  // Must be set BEFORE opening the codec
   m_codecContext->get_format = get_hw_format;
 
   if (avcodec_open2(m_codecContext, m_codec, nullptr) < 0)
@@ -114,4 +130,12 @@ bool Wallpaper::decodeNextFrame() {
     }
     // loop back to receive_frame
   }
+}
+
+Wallpaper::~Wallpaper() {
+  av_packet_free(&m_packet);
+  av_frame_free(&m_frame);
+  avcodec_free_context(&m_codecContext);
+  avformat_close_input(&m_formatContext);
+  av_buffer_unref(&m_hwDeviceContext);
 }

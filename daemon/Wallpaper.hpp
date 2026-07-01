@@ -17,6 +17,8 @@ public:
       std::chrono::milliseconds(16); // assume 60fps
   bool decodeNextFrame();
   AVCodecContext *m_codecContext = nullptr;
+  bool m_isSingleFrame = false;
+  ~Wallpaper();
 
 public:
   WallpaperBindError bind(std::string_view img_path , VADisplay va_display);

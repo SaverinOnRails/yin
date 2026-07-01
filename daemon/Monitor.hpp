@@ -36,6 +36,7 @@ public:
   void onFrame();
   void onScaleChanged();
   bool m_shadersSetup = false;
+  void setPlayPause(bool play);
 
 private:
   wl_surface *m_waylandSurface;
@@ -49,6 +50,7 @@ private:
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
+  bool m_wallpaperPlaying = true; //this just means not paused
   void setBufferSize();
   GLuint m_textures[2];
   EGLImage m_images[2];

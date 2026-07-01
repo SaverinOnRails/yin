@@ -12,7 +12,7 @@ using i32 = int32_t;
 using u8 = uint8_t;
 class Daemon;
 
-enum Messages : u8 { MonitorSize = 0, SetWallpaper = 1 };
+enum Messages : u8 { MonitorSize = 0, SetWallpaper = 1, PlayPause };
 
 class VectorWriter {
 public:
@@ -66,8 +66,11 @@ struct SetWallpaperMessage {
   std::optional<std::string> monitor;
   std::string imgPath;
 };
-
-using Message = std::variant<MonitorSizeMessage, SetWallpaperMessage>;
+struct PlayPauseMessage {
+  std::optional<std::string> monitor;
+  bool play;
+};
+using Message = std::variant<MonitorSizeMessage, SetWallpaperMessage , PlayPauseMessage>;
 
 std::vector<u8> SerializeMessage(Message &msg);
 Message DeserializeMessage(char *buf, size_t len);

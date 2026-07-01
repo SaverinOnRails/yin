@@ -15,7 +15,12 @@ std::vector<u8> SerializeMessage(Message &msg) {
     writer.write(MonitorSize);
     writer.writeOptionalMonitor(m.monitor);
   }
-
+  if (std::holds_alternative<PlayPauseMessage>(msg)) {
+    auto &m = std::get<PlayPauseMessage>(msg);
+    writer.write(PlayPause);
+    writer.writeOptionalMonitor(m.monitor);
+    writer.write(m.play ? 1 : 0);
+  }
   if (std::holds_alternative<SetWallpaperMessage>(msg)) {
     auto &m = std::get<SetWallpaperMessage>(msg);
 
@@ -34,6 +39,11 @@ Message DeserializeMessage(char *buf, size_t len) {
   case MonitorSize:
     return MonitorSizeMessage{.monitor = bufReader.readOptionalMonitor()};
     break;
+  case PlayPause: {
+    PlayPauseMessage msg = {.monitor = bufReader.readOptionalMonitor()};
+    msg.play = bufReader.read() == 1 ? true : 0;
+    return msg;
+  }
   case SetWallpaper: {
     SetWallpaperMessage msg = {.monitor = bufReader.readOptionalMonitor()};
     auto img_path_len = bufReader.readu32();

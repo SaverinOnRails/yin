@@ -4,6 +4,7 @@
 #include "shared/utils.hpp"
 #include <cstddef>
 #include <cstring>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -90,6 +91,12 @@ void IPC::serverAccept(Daemon &daemon) {
         write(client, success_message, std::strlen(success_message));
       }
 #endif
+    } else if (std::holds_alternative<PlayPauseMessage>(message)) {
+      auto mes = std::get<PlayPauseMessage>(message);
+      auto monitor = daemonFindMonitor(daemon, mes.monitor);
+      #ifdef YIN_DAEMON
+        monitor->setPlayPause(mes.play);
+      #endif
     }
   }
   close(client);
