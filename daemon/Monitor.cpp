@@ -11,6 +11,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <unistd.h>
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
@@ -28,6 +29,7 @@ static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
   auto monitor = static_cast<Monitor *>(data);
   monitor->m_scale = scale;
+  // monitor->onScaleChanged();
 }
 
 static void output_name(void *data, struct wl_output *wl_output,
@@ -70,6 +72,7 @@ static void fract_preferred_scale(void *data, struct wp_fractional_scale_v1 *f,
                                   uint32_t scale) {
   auto monitor = static_cast<Monitor *>(data);
   monitor->m_fractScale = scale;
+  // monitor->onScaleChanged();
 }
 
 static const struct wp_fractional_scale_v1_listener fract_scale_listener = {
@@ -84,7 +87,9 @@ static void layer_surface_configure(void *data,
   monitor->m_width = width;
   zwlr_layer_surface_v1_ack_configure(monitor->getLayerSurface(), serial);
   monitor->resizeEGL();
-  monitor->setupGlShaders();
+  if (monitor->m_shadersSetup == false) {
+    monitor->setupGlShaders();
+  }
   // monitor->createAndAttachBuffer();
 }
 
@@ -173,6 +178,11 @@ void Monitor::setBufferSize() {
 
 void Monitor::resizeEGL() {
   setBufferSize();
+  if (m_viewport) {
+    wp_viewport_set_destination(m_viewport, m_width, m_height);
+  } else {
+    wl_surface_set_buffer_scale(m_waylandSurface, m_scale);
+  }
   if (m_daemon.m_eglDisplay == EGL_NO_DISPLAY ||
       m_daemon.m_eglContext == EGL_NO_CONTEXT) {
     throw std::runtime_error("OpenGL renderer is not bound");
@@ -206,6 +216,13 @@ void Monitor::resizeEGL() {
     std::cout << eglGetError() << std::endl;
     throw std::runtime_error("eglSwapBuffers failed");
   }
+  glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
+             static_cast<GLsizei>(m_bufferHeight));
+
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
+    throw std::runtime_error("eglSwapBuffers failed");
+  }
 }
 
 void Monitor::render() {
@@ -214,9 +231,15 @@ void Monitor::render() {
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed ");
   }
+
+  for (int i = 0; i < 2; ++i) {
+    if (m_images[i] != EGL_NO_IMAGE) {
+      m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_images[i]);
+      m_images[i] = EGL_NO_IMAGE;
+    }
+  }
   if (!m_wallpaper->decodeNextFrame())
     return;
-  std::cout << "Attempting to render" << std::endl;
   VASurfaceID va_surface = (uintptr_t)m_wallpaper->m_frame->data[3];
 
   VADRMPRIMESurfaceDescriptor prime;
@@ -241,7 +264,6 @@ void Monitor::render() {
                           (double)prime.height);
     texture_size_valid = true;
   }
-  EGLImage images[2];
   for (int i = 0; i < 2; ++i) {
     static const uint32_t formats[2] = {DRM_FORMAT_R8, DRM_FORMAT_GR88};
 #define LAYER i
@@ -263,10 +285,10 @@ void Monitor::render() {
         EGL_DMA_BUF_PLANE0_PITCH_EXT,
         static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE]),
         EGL_NONE};
-    images[i] =
+    m_images[i] =
         m_daemon.eglCreateImageKHR(m_daemon.m_eglDisplay, EGL_NO_CONTEXT,
                                    EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
-    if (!images[i]) {
+    if (!m_images[i]) {
       throw std::runtime_error(i ? "chroma eglCreateImageKHR"
                                  : "luma eglCreateImageKHR");
     }
@@ -274,12 +296,15 @@ void Monitor::render() {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
     while (glGetError()) {
     }
-    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, images[i]);
+    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_images[i]);
     if (glGetError()) {
       throw std::runtime_error("glEGLImageTargetTexture2DOES");
     }
   }
 
+  for (int i = 0; i < (int)prime.num_objects; ++i) {
+    close(prime.objects[i].fd);
+  }
   // draw the frame
   glClear(GL_COLOR_BUFFER_BIT);
   while (glGetError()) {
@@ -332,8 +357,32 @@ void Monitor::onFrame() {
   nextFrame();
 }
 
-// https://gist.github.com/kajott/d1b29c613be30893c855621edd1f212e
+void Monitor::onScaleChanged() {
 
+  if (m_waylandSurface == nullptr || m_layerSurface == nullptr)
+    return;
+
+  setBufferSize();
+
+  if (m_viewport) {
+    wp_viewport_set_destination(m_viewport, m_width, m_height);
+  } else {
+    wl_surface_set_buffer_scale(m_waylandSurface, m_scale);
+  }
+
+  if (m_eglWindow != nullptr) {
+    wl_egl_window_resize(m_eglWindow, static_cast<int>(m_bufferWidth),
+                         static_cast<int>(m_bufferHeight), 0, 0);
+    if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
+                       m_daemon.m_eglContext) == EGL_TRUE) {
+      glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
+                 static_cast<GLsizei>(m_bufferHeight));
+    }
+  }
+  wl_surface_commit(m_waylandSurface);
+}
+
+// https://gist.github.com/kajott/d1b29c613be30893c855621edd1f212e
 #define DECLARE_YUV2RGB_MATRIX_GLSL                                            \
   "const mat4 yuv2rgb = mat4(\n"                                               \
   "    vec4(  1.1644,  1.1644,  1.1644,  0.0000 ),\n"                          \
@@ -342,12 +391,11 @@ void Monitor::onFrame() {
   "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
 
 void Monitor::setupGlShaders() {
-  std::cout << "Setting up gl shaders" << std::endl;
   if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
-  // glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0);
+  glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0);
   const char *vs_src = "void main() {"
                        "\n"
                        "    gl_Position = ftransform();"
@@ -412,4 +460,5 @@ void Monitor::setupGlShaders() {
   // initial window size setup
   GLint vp[4];
   glGetIntegerv(GL_VIEWPORT, vp);
+  m_shadersSetup = true;
 }

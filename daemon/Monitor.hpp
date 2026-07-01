@@ -21,13 +21,11 @@ public:
   void setName(const char *name);
   void createLayerSurface();
   zwlr_layer_surface_v1 *getLayerSurface();
-  bool readyForPaint = false;
   u32 m_height, m_width;
   u32 m_bufferHeight, m_bufferWidth;
   i32 m_scale = 0;
   u32 m_fractScale = 0;
   u32 configure_serial;
-  bool needs_ack = false;
   std::string m_name;
   void resizeEGL();
   void createAndAttachBuffer();
@@ -36,6 +34,8 @@ public:
   WallpaperBindError setWallpaper(std::string img_path);
   void setupGlShaders();
   void onFrame();
+  void onScaleChanged();
+  bool m_shadersSetup = false;
 
 private:
   wl_surface *m_waylandSurface;
@@ -51,5 +51,6 @@ private:
   void nextFrame();
   void setBufferSize();
   GLuint m_textures[2];
+  EGLImage m_images[2];
   void render();
 };
