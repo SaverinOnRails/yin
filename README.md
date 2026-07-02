@@ -1,3 +1,6 @@
+
+
+
 ## Yin
 Yin is an efficient animated wallpaper daemon inspired by [swww](https://github.com/LGFae/swww).
 Yin is IPC controlled, hardware accelerated and can play pretty much anything that ffmpeg can. It is also extremely lightweight, depending only on wayland and ffmpeg.
@@ -35,10 +38,8 @@ Then control it with yinctl
 ```
 yinctl --help
 ```
+https://github.com/user-attachments/assets/552923ae-e535-4461-a34f-fb7d5c7c057a
 
-
-
-https://github.com/user-attachments/assets/e97912b1-6d31-4ee8-800b-73f1c1de1a7e
 
 # FEATURES
 - Runtime control via IPC without ever needing to restart the daemon
