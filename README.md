@@ -54,5 +54,6 @@ For example with intel on arch linux:
 sudo pacman -S mesa libva-intel-driver intel-media-driver
 ```
 
+Nvidia currently might NOT WORK with yin, i'm still trying to figure that out, if you know anything about using NVDEC or the tweaking the code to work with the nvidia vaapi driver, please contribute. 
 
 
