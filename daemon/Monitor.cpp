@@ -215,10 +215,6 @@ void Monitor::resizeEGL() {
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
-  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
-    std::cout << eglGetError() << std::endl;
-    throw std::runtime_error("eglSwapBuffers failed");
-  }
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
 
