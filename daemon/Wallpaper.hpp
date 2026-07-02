@@ -9,7 +9,7 @@ extern "C" {
 }
 #include <string_view>
 
-enum WallpaperBindError : u8 { Success, BadVideo, NoHarwareDecoding };
+enum WallpaperBindError : u8 { Success, BadVideo, NoHarwareDecoding , NoHistory };
 
 class Wallpaper {
 public:

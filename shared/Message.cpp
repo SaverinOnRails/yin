@@ -1,6 +1,8 @@
 #include "shared/utils.hpp"
 #include <cstddef>
+#include <iostream>
 #include <stdexcept>
+#include <string>
 #include <variant>
 #include <vector>
 // ipc messages
@@ -29,6 +31,11 @@ std::vector<u8> SerializeMessage(Message &msg) {
     writer.writeu32(m.imgPath.length());
     writer.writeString(m.imgPath);
   }
+  if (std::holds_alternative<RestoreMessage>(msg)) {
+    auto &m = std::get<RestoreMessage>(msg);
+    writer.write(Restore);
+    writer.writeOptionalMonitor(m.monitor);
+  }
 
   return out;
 }
@@ -50,6 +57,9 @@ Message DeserializeMessage(char *buf, size_t len) {
     msg.imgPath = bufReader.readString(img_path_len);
     return msg;
   };
+  case Restore:
+    return RestoreMessage{.monitor = bufReader.readOptionalMonitor()};
+    break;
   default:
     throw std::runtime_error("Unknown message");
   }

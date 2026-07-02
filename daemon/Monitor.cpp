@@ -8,9 +8,12 @@
 #include <cassert>
 #include <cstdint>
 #include <drm/drm_fourcc.h>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <unistd.h>
 #include <va/va.h>
 #include <va/va_drm.h>
@@ -337,12 +340,25 @@ void Monitor::render() {
   }
 }
 
+std::filesystem::path Monitor::historyFile() {
+  const char *home = std::getenv("HOME");
+  std::filesystem::path cache_dir =
+      std::filesystem::path(home) / ".cache" / "yin";
+  auto filename = m_name;
+  return cache_dir / filename;
+}
 WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
   m_wallpaperPlaying = true;
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
+
+    // write to history file
+    auto file_path = historyFile();
+    std::ofstream cachefile(file_path);
+    cachefile << img_path;
+    cachefile.close();
     // start playback
     nextFrame();
   } else {
@@ -481,4 +497,20 @@ void Monitor::setPlayPause(bool play) {
     nextFrame();
   }
   m_wallpaperPlaying = play;
+}
+WallpaperBindError Monitor::restoreWallpaper() {
+  auto history_file = historyFile();
+  if (!std::filesystem::exists(history_file)) {
+    return NoHistory;
+  }
+  std::ifstream file(history_file);
+  if (file.is_open()) {
+    std::string first_line;
+    if (!std::getline(file, first_line))
+      return NoHistory;
+    if (!std::filesystem::exists(first_line))
+      return BadVideo;
+    return setWallpaper(first_line);
+  }
+  return NoHistory;
 }

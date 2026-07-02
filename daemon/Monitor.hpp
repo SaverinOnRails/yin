@@ -8,6 +8,7 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <wayland-client-protocol.h>
@@ -32,6 +33,7 @@ public:
   std::chrono::steady_clock::time_point m_nextVideoFrame;
   std::unique_ptr<Buffer> m_buffer;
   WallpaperBindError setWallpaper(std::string img_path);
+  WallpaperBindError restoreWallpaper();
   void setupGlShaders();
   void onFrame();
   void onScaleChanged();
@@ -52,6 +54,7 @@ private:
   void nextFrame();
   bool m_wallpaperPlaying = true; //this just means not paused
   void setBufferSize();
+  std::filesystem::path historyFile();
   GLuint m_textures[2];
   EGLImage m_images[2];
   void render();

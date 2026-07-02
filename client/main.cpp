@@ -9,11 +9,13 @@
 
 void setWallpaper();
 void PlayPauseWallpaper(bool play);
+void RestoreWallpaper();
 void getMonitorDimensions(u32 &width, u32 &height);
 struct Arguments {
   std::optional<std::string> img_path;
   std::optional<std::string> monitor;
   bool play;
+  bool restore =  false;
 };
 
 Arguments args = Arguments{};
@@ -37,6 +39,9 @@ void process_args(int argc, char **argv) {
     if (std::strcmp(argv[i], "--play") == 0) {
       args.play = true;
     }
+    if (std::strcmp(argv[i], "--restore") == 0) {
+      args.restore = true;
+    }
   }
 }
 
@@ -46,7 +51,11 @@ int main(int argc, char **argv) {
 
   if (args.img_path.has_value()) {
     setWallpaper();
-  } else if (args.play == false || args.play == true) {
+  }
+  else if (args.restore == true) {
+    RestoreWallpaper();
+  }
+  else if (args.play == false || args.play == true) {
     PlayPauseWallpaper(args.play);
   }
 }
@@ -56,7 +65,7 @@ void PlayPauseWallpaper(bool play) {
   // exists or is correct so we're just gonna call it
   u32 width, height;
   getMonitorDimensions(width, height);
-  Message message = PlayPauseMessage{.monitor = args.monitor ,.play = play};
+  Message message = PlayPauseMessage{.monitor = args.monitor, .play = play};
   // reset connection for fresh message
   auto payload = SerializeMessage(message);
   ipc.clientConnect();
@@ -97,6 +106,20 @@ void setWallpaper() {
   ipc.clientConnect();
   ipc.clientWrite(payload.data(), payload.size());
 
+  char msg[1024];
+  auto bytes = ipc.clientRead(msg, sizeof(msg));
+  std::string response(msg, bytes);
+  std::cout << response << std::endl;
+}
+
+void RestoreWallpaper() {
+  u32 width, height;
+  getMonitorDimensions(width, height);
+  Message message = RestoreMessage{.monitor = args.monitor};
+  auto payload = SerializeMessage(message);
+  auto len = payload.size();
+  ipc.clientConnect();
+  ipc.clientWrite(payload.data(), len);
   char msg[1024];
   auto bytes = ipc.clientRead(msg, sizeof(msg));
   std::string response(msg, bytes);

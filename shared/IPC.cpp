@@ -56,6 +56,13 @@ void IPC::serverAccept(Daemon &daemon) {
   int client = accept(m_serverFd, nullptr, nullptr);
   char buffer[1024];
   ssize_t bytes = ::read(client, buffer, sizeof(buffer));
+  char bad_video_message[] =
+      "Problem with video file, please delete ~/cache/yin and try again";
+  char no_hardware_decoding[] =
+      "Hardware decoding is unavailable, cannot proceed"; // maybe we can,
+                                                          // we'll find out
+  char no_history[] = "No wallpaper previously set on this monitor";
+  char success_message[] = "Img sent to daemon!";
   if (bytes > 0) {
     auto message = DeserializeMessage(buffer, bytes);
     if (std::holds_alternative<MonitorSizeMessage>(message)) {
@@ -74,12 +81,6 @@ void IPC::serverAccept(Daemon &daemon) {
 #ifdef YIN_DAEMON
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
       auto error = monitor->setWallpaper(mes.imgPath);
-      char bad_video_message[] =
-          "Problem with video file, please delete ~/cache/yin and try again";
-      char no_hardware_decoding[] =
-          "Hardware decoding is unavailable, cannot proceed"; // maybe we can,
-                                                              // we'll find out
-      char success_message[] = "Img sent to daemon!";
 
       if (error == BadVideo) {
         write(client, bad_video_message, std::strlen(bad_video_message));
@@ -94,9 +95,27 @@ void IPC::serverAccept(Daemon &daemon) {
     } else if (std::holds_alternative<PlayPauseMessage>(message)) {
       auto mes = std::get<PlayPauseMessage>(message);
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
-      #ifdef YIN_DAEMON
-        monitor->setPlayPause(mes.play);
-      #endif
+#ifdef YIN_DAEMON
+      monitor->setPlayPause(mes.play);
+#endif
+    } else if (std::holds_alternative<RestoreMessage>(message)) {
+      auto mes = std::get<RestoreMessage>(message);
+#ifdef YIN_DAEMON
+      auto monitor = daemonFindMonitor(daemon, mes.monitor);
+      auto error = monitor->restoreWallpaper();
+      if (error == BadVideo) {
+        write(client, bad_video_message, std::strlen(bad_video_message));
+      }
+      if (error == NoHarwareDecoding) {
+        write(client, no_hardware_decoding, std::strlen(no_hardware_decoding));
+      }
+      if (error == Success) {
+        write(client, success_message, std::strlen(success_message));
+      }
+      if (error == NoHistory) {
+        write(client, no_history, std::strlen(no_history));
+      }
+#endif
     }
   }
   close(client);

@@ -12,7 +12,7 @@ using i32 = int32_t;
 using u8 = uint8_t;
 class Daemon;
 
-enum Messages : u8 { MonitorSize = 0, SetWallpaper = 1, PlayPause };
+enum Messages : u8 { MonitorSize = 0, SetWallpaper = 1, PlayPause = 2, Restore = 3 };
 
 class VectorWriter {
 public:
@@ -70,10 +70,16 @@ struct PlayPauseMessage {
   std::optional<std::string> monitor;
   bool play;
 };
-using Message = std::variant<MonitorSizeMessage, SetWallpaperMessage , PlayPauseMessage>;
+
+struct RestoreMessage {
+  std::optional<std::string> monitor;
+};
+
+using Message =
+    std::variant<MonitorSizeMessage, SetWallpaperMessage, PlayPauseMessage , RestoreMessage>;
 
 std::vector<u8> SerializeMessage(Message &msg);
 Message DeserializeMessage(char *buf, size_t len);
 void cacheVideo(std::string_view filepath, std::string_view write_to, u32 width,
                 u32 height);
-std::string getCachePath(u32 width, u32 height , std::string_view path);
+std::string getCachePath(u32 width, u32 height, std::string_view path);
