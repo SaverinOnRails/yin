@@ -1,6 +1,5 @@
 #include "daemon/Wallpaper.hpp"
 #include <chrono>
-#include <iostream>
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
