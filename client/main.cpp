@@ -1,5 +1,6 @@
 #include "../shared/IPC.hpp"
 #include "shared/utils.hpp"
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iostream>
@@ -10,12 +11,14 @@
 void setWallpaper();
 void PlayPauseWallpaper(bool play);
 void RestoreWallpaper();
+void printHelp();
 void getMonitorDimensions(u32 &width, u32 &height);
 struct Arguments {
   std::optional<std::string> img_path;
   std::optional<std::string> monitor;
   bool play;
-  bool restore =  false;
+  bool help = false;
+  bool restore = false;
 };
 
 Arguments args = Arguments{};
@@ -42,24 +45,46 @@ void process_args(int argc, char **argv) {
     if (std::strcmp(argv[i], "--restore") == 0) {
       args.restore = true;
     }
+    if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
+      args.help= true;
+    }
   }
 }
 
 int main(int argc, char **argv) {
   process_args(argc, argv);
-  ipc.clientConnect();
+  if(args.help == true) {
+    printHelp();
+  }
 
+  ipc.clientConnect();
   if (args.img_path.has_value()) {
     setWallpaper();
-  }
-  else if (args.restore == true) {
+  } else if (args.restore == true) {
     RestoreWallpaper();
-  }
-  else if (args.play == false || args.play == true) {
+  } else if (args.play == false || args.play == true) {
     PlayPauseWallpaper(args.play);
   }
 }
 
+void printHelp() {
+  std::cout << "Usage: " << "yinctl" << " [OPTIONS]\n\n"
+            << "Options:\n"
+            << "  --img <FILE>        Set the wallpaper to FILE\n"
+            << "  --output <MONITOR>  Apply the action to a specific monitor\n"
+            << "                      (defaults to all monitors)\n"
+            << "  --play              Resume animated wallpaper playback\n"
+            << "  --pause             Pause animated wallpaper playback\n"
+            << "  --restore           Restore previously cached wallpapers\n"
+            << "  -h, --help          Show this help message\n\n"
+            << "Examples:\n"
+            << "  " << "yinctl" << " --img ~/Pictures/wallpaper.jpg\n"
+            << "  " << "yinctl" << " --img video.mp4 --output HDMI-A-1\n"
+            << "  " << "yinctl" << " --pause\n"
+            << "  " << "yinctl" << " --play --output DP-1\n"
+            << "  " << "yinctl" << " --restore\n";
+  std::exit(1);
+}
 void PlayPauseWallpaper(bool play) {
   // get monitor dimensions is convenient for checking if the monitor supplied
   // exists or is correct so we're just gonna call it
