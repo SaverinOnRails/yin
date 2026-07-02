@@ -1,0 +1,58 @@
+#pragma once
+#include "daemon/Buffer.hpp"
+#include "daemon/Daemon.hpp"
+#include "daemon/Wallpaper.hpp"
+#include "fractional-scale-v1-client-protocol.h"
+#include "shared/utils.hpp"
+#include "viewporter-client-protocol.h"
+#include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
+#include <memory>
+#include <string>
+#include <wayland-client-protocol.h>
+#include <wayland-egl-core.h>
+#include <wayland-egl.h>
+class Daemon;
+class Monitor {
+public:
+  Monitor(wl_output *output, Daemon &daemon);
+  void setListener();
+  void setName(const char *name);
+  void createLayerSurface();
+  zwlr_layer_surface_v1 *getLayerSurface();
+  u32 m_height, m_width;
+  u32 m_bufferHeight, m_bufferWidth;
+  i32 m_scale = 0;
+  u32 m_fractScale = 0;
+  u32 configure_serial;
+  std::string m_name;
+  void resizeEGL();
+  void createAndAttachBuffer();
+  std::chrono::steady_clock::time_point m_nextVideoFrame;
+  std::unique_ptr<Buffer> m_buffer;
+  WallpaperBindError setWallpaper(std::string img_path);
+  void setupGlShaders();
+  void onFrame();
+  void onScaleChanged();
+  bool m_shadersSetup = false;
+  void setPlayPause(bool play);
+
+private:
+  wl_surface *m_waylandSurface;
+  Daemon &m_daemon;
+  zwlr_layer_surface_v1 *m_layerSurface;
+  wp_fractional_scale_v1 *m_fractionalScale;
+  wp_viewport *m_viewport;
+  wl_output *m_waylandOutput;
+  u32 m_waylandName;
+  wl_egl_window *m_eglWindow = nullptr;
+  EGLSurface m_eglSurface = EGL_NO_SURFACE;
+  std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
+  void nextFrame();
+  bool m_wallpaperPlaying = true; //this just means not paused
+  void setBufferSize();
+  GLuint m_textures[2];
+  EGLImage m_images[2];
+  void render();
+};
