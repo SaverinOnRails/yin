@@ -69,10 +69,10 @@ void IPC::serverAccept(Daemon &daemon) {
       }
     } else if (std::holds_alternative<SetWallpaperMessage>(message)) {
       auto mes = std::get<SetWallpaperMessage>(message);
-      auto monitor = daemonFindMonitor(daemon, mes.monitor);
 
 // cheap hack to satisy linker
 #ifdef YIN_DAEMON
+      auto monitor = daemonFindMonitor(daemon, mes.monitor);
       auto error = monitor->setWallpaper(mes.imgPath);
       char bad_video_message[] =
           "Problem with video file, please delete ~/cache/yin and try again";
