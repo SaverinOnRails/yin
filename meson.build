@@ -38,6 +38,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'shared/IPC.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:[wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,va_wayland], cpp_args: ['-DYIN_DAEMON'])
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:[wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,va_wayland], cpp_args: ['-DYIN_DAEMON'])
 
- executable('yinctl' , ['client/main.cpp' , 'shared/IPC.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp',protos_src] , dependencies:[wayland_client_dep])
+ executable('yinctl' , ['client/main.cpp' , 'client/IPC_Client.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp',protos_src] , dependencies:[wayland_client_dep])

@@ -1,34 +1,14 @@
-#include "IPC.hpp"
+#include "shared/IPC.hpp"
 #include "daemon/Monitor.hpp"
 #include "daemon/Wallpaper.hpp"
 #include "shared/utils.hpp"
-#include <cstddef>
 #include <cstring>
-#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <variant>
-
-class Monitor;
-void IPC::clientConnect() {
-  const char *SOCKET_PATH = "/tmp/yin";
-  m_clientFd = socket(AF_UNIX, SOCK_STREAM, 0);
-  if (m_clientFd == -1) {
-    throw std::runtime_error(
-        "Could not connect to Ipc socket, is Yin daemon running?");
-  }
-  sockaddr_un addr{};
-  addr.sun_family = AF_UNIX;
-  strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
-
-  if (connect(m_clientFd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) ==
-      -1)
-    throw std::runtime_error(
-        "Could not connect to Ipc socket, is Yin daemon running?");
-}
 
 void IPC::serverCreate() {
   constexpr const char *SOCKET_PATH = "/tmp/yin";
@@ -51,6 +31,7 @@ void IPC::serverCreate() {
     throw std::runtime_error("Could not start IPC server");
   }
 }
+
 
 void IPC::serverAccept(Daemon &daemon) {
   int client = accept(m_serverFd, nullptr, nullptr);
@@ -77,8 +58,6 @@ void IPC::serverAccept(Daemon &daemon) {
     } else if (std::holds_alternative<SetWallpaperMessage>(message)) {
       auto mes = std::get<SetWallpaperMessage>(message);
 
-// cheap hack to satisy linker
-#ifdef YIN_DAEMON
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
       auto error = monitor->setWallpaper(mes.imgPath);
 
@@ -91,16 +70,12 @@ void IPC::serverAccept(Daemon &daemon) {
       if (error == Success) {
         write(client, success_message, std::strlen(success_message));
       }
-#endif
     } else if (std::holds_alternative<PlayPauseMessage>(message)) {
       auto mes = std::get<PlayPauseMessage>(message);
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
-#ifdef YIN_DAEMON
       monitor->setPlayPause(mes.play);
-#endif
     } else if (std::holds_alternative<RestoreMessage>(message)) {
       auto mes = std::get<RestoreMessage>(message);
-#ifdef YIN_DAEMON
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
       auto error = monitor->restoreWallpaper();
       if (error == BadVideo) {
@@ -115,7 +90,6 @@ void IPC::serverAccept(Daemon &daemon) {
       if (error == NoHistory) {
         write(client, no_history, std::strlen(no_history));
       }
-#endif
     }
   }
   close(client);
@@ -134,10 +108,4 @@ Monitor *IPC::daemonFindMonitor(Daemon &daemon,
     }
   }
   return nullptr;
-}
-void IPC::clientWrite(unsigned char *data, size_t len) {
-  ::write(m_clientFd, reinterpret_cast<char *>(data), len);
-}
-size_t IPC::clientRead(char *buffer, size_t len) {
-  return ::read(m_clientFd, buffer, len);
 }
