@@ -4,7 +4,6 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
-#include "yinctl.p/viewporter-client-protocol.h"
 #include <cassert>
 #include <cstdlib>
 #include <cstring>

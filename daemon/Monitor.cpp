@@ -2,7 +2,6 @@
 #include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
-#include "yinctl.p/viewporter-client-protocol.h"
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <cassert>
