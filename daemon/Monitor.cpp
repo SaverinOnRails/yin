@@ -5,6 +5,7 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <drm/drm_fourcc.h>
 #include <filesystem>
@@ -370,6 +371,13 @@ void Monitor::nextFrame() {
 
 void Monitor::onFrame() {
   auto now = std::chrono::steady_clock::now();
+  auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now - m_nextVideoFrame)
+                  .count();
+  //incase the compositor sends us to sleep
+  if (diff > 100) {
+    m_nextVideoFrame = now;
+  }
   if (now >= m_nextVideoFrame && m_wallpaper != nullptr) {
     m_nextVideoFrame += m_wallpaper->m_frameDuration;
     render();
