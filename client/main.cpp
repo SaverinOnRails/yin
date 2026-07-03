@@ -1,7 +1,6 @@
-#include "../shared/IPC.hpp"
+#include "shared/IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -26,34 +25,29 @@ IPC ipc = IPC{};
 
 void process_args(int argc, char **argv) {
   for (int i = 0; i < argc; i++) {
-    if (std::strcmp(argv[i], "--img") == 0) {
+    if (argv[i] == std::string_view{"--img"}) {
       if (i + 1 >= argc)
         throw std::runtime_error("Img not specified");
       args.img_path = argv[i + 1];
-    }
-    if (std::strcmp(argv[i], "--output") == 0) {
+    } else if (argv[i] == std::string_view{"--output"}) {
       if (i + 1 >= argc)
         throw std::runtime_error("Output not specified");
       args.monitor = argv[i + 1];
-    }
-    if (std::strcmp(argv[i], "--pause") == 0) {
+    } else if (argv[i] == std::string_view{"--pause"}) {
       args.play = false;
-    }
-    if (std::strcmp(argv[i], "--play") == 0) {
+    } else if (argv[i] == std::string_view{"--play"}) {
       args.play = true;
-    }
-    if (std::strcmp(argv[i], "--restore") == 0) {
+    } else if (argv[i] == std::string_view{"--restore"}) {
       args.restore = true;
-    }
-    if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-      args.help= true;
+    } else if (argv[i] == std::string_view{"--help"}) {
+      args.help = true;
     }
   }
 }
 
 int main(int argc, char **argv) {
   process_args(argc, argv);
-  if(args.help == true) {
+  if (args.help == true) {
     printHelp();
   }
 
@@ -62,6 +56,7 @@ int main(int argc, char **argv) {
     setWallpaper();
   } else if (args.restore == true) {
     RestoreWallpaper();
+  // This is always true
   } else if (args.play == false || args.play == true) {
     PlayPauseWallpaper(args.play);
   }
@@ -85,6 +80,7 @@ void printHelp() {
             << "  " << "yinctl" << " --restore\n";
   std::exit(1);
 }
+
 void PlayPauseWallpaper(bool play) {
   // get monitor dimensions is convenient for checking if the monitor supplied
   // exists or is correct so we're just gonna call it
