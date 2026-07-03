@@ -6,6 +6,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 void setWallpaper();
 void PlayPauseWallpaper(bool play);
@@ -15,7 +16,7 @@ void getMonitorDimensions(u32 &width, u32 &height);
 struct Arguments {
   std::optional<std::string> img_path;
   std::optional<std::string> monitor;
-  bool play;
+  std::optional<bool> play;
   bool help = false;
   bool restore = false;
 };
@@ -39,7 +40,7 @@ void process_args(int argc, char **argv) {
       args.play = true;
     } else if (argv[i] == std::string_view{"--restore"}) {
       args.restore = true;
-    } else if (argv[i] == std::string_view{"--help"}) {
+    } else if (argv[i] == std::string_view{"--help"} || argv[i] == std::string_view{"-h"}) {
       args.help = true;
     }
   }
@@ -56,9 +57,8 @@ int main(int argc, char **argv) {
     setWallpaper();
   } else if (args.restore == true) {
     RestoreWallpaper();
-  // This is always true
-  } else if (args.play == false || args.play == true) {
-    PlayPauseWallpaper(args.play);
+  } else if (args.play.has_value()) {
+    PlayPauseWallpaper(*args.play);
   }
 }
 
