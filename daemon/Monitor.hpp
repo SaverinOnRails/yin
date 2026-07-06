@@ -36,10 +36,11 @@ public:
   WallpaperBindError setWallpaper(std::string img_path);
   WallpaperBindError restoreWallpaper();
   void setupGl();
-  void onFrame();
+  void onFrame(u32 scheduledID);
   void onScaleChanged();
   bool m_glSetup = false;
   void setPlayPause(bool play);
+  u32 m_wallpaperID;
 
 private:
   wl_surface *m_waylandSurface;
@@ -63,4 +64,9 @@ private:
   u32 m_VAO;
   GLuint m_glShaderProgram;
   void render();
+};
+
+struct FrameCallbackData {
+  Monitor *monitor;
+  uint64_t scheduledID;
 };

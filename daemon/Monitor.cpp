@@ -64,9 +64,10 @@ static const struct wl_output_listener output_listener = {
 };
 
 static void frame_done(void *data, wl_callback *callback, uint32_t) {
-  auto *monitor = static_cast<Monitor *>(data);
+  auto cbData = static_cast<FrameCallbackData *>(data);
   wl_callback_destroy(callback);
-  monitor->onFrame();
+  cbData->monitor->onFrame(cbData->scheduledID);
+  delete cbData;
 }
 
 static const struct wl_callback_listener frame_listener = {
@@ -332,7 +333,7 @@ WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
-
+    m_wallpaperID++;
     // write to history file
     auto file_path = historyFile();
     std::ofstream cachefile(file_path);
@@ -348,11 +349,14 @@ WallpaperBindError Monitor::setWallpaper(std::string img_path) {
 
 void Monitor::nextFrame() {
   auto *cb = wl_surface_frame(m_waylandSurface);
-  wl_callback_add_listener(cb, &frame_listener, this);
+  auto cbData = new FrameCallbackData{this, m_wallpaperID};
+  wl_callback_add_listener(cb, &frame_listener, cbData);
   wl_surface_commit(m_waylandSurface);
 }
 
-void Monitor::onFrame() {
+void Monitor::onFrame(u32 scheduledID) {
+  if (scheduledID != m_wallpaperID)
+    return;
   auto now = std::chrono::steady_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
                   now - m_nextVideoFrame)
