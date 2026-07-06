@@ -4,6 +4,7 @@
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <EGL/egl.h>
 #include <GL/gl.h>
+#include <GLES2/gl2.h>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -261,6 +262,7 @@ void Monitor::render() {
       (float)((double)m_wallpaper->m_codecContext->width / (double)prime.width);
   texcoord_y1 = (float)((double)m_wallpaper->m_codecContext->height /
                         (double)prime.height);
+  glUseProgram(m_glShaderProgram);
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
               texcoord_x1, texcoord_y1);
 
