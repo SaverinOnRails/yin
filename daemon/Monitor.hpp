@@ -7,6 +7,7 @@
 #include "viewporter-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <EGL/egl.h>
+#include <GL/gl.h>
 #include <GLES2/gl2.h>
 #include <filesystem>
 #include <memory>
@@ -34,10 +35,10 @@ public:
   std::unique_ptr<Buffer> m_buffer;
   WallpaperBindError setWallpaper(std::string img_path);
   WallpaperBindError restoreWallpaper();
-  void setupGlShaders();
+  void setupGl();
   void onFrame();
   void onScaleChanged();
-  bool m_shadersSetup = false;
+  bool m_glSetup = false;
   void setPlayPause(bool play);
 
 private:
@@ -55,7 +56,11 @@ private:
   bool m_wallpaperPlaying = true; //this just means not paused
   void setBufferSize();
   std::filesystem::path historyFile();
+
+  //GL STATE
   GLuint m_textures[2];
-  EGLImage m_images[2];
+  EGLImage m_eglImages[2];
+  u32 m_VAO;
+  GLuint m_glShaderProgram;
   void render();
 };

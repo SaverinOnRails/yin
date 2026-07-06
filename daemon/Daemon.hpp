@@ -40,7 +40,7 @@ public:
   PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = nullptr;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = nullptr;
   PFNGLGENVERTEXARRAYSPROC glGenVertexArrays = nullptr;
-  PFNGLBINDVERTEXARRAYPROC glBindVertexArrays = nullptr;
+  PFNGLBINDVERTEXARRAYPROC glBindVertexArray = nullptr;
 
 private:
   wl_compositor *m_waylandCompositor;

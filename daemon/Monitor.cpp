@@ -14,6 +14,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <sys/socket.h>
 #include <unistd.h>
 #include <va/va.h>
 #include <va/va_drm.h>
@@ -90,8 +91,8 @@ static void layer_surface_configure(void *data,
   monitor->m_width = width;
   zwlr_layer_surface_v1_ack_configure(monitor->getLayerSurface(), serial);
   monitor->resizeEGL();
-  if (monitor->m_shadersSetup == false) {
-    monitor->setupGlShaders();
+  if (monitor->m_glSetup == false) {
+    monitor->setupGl();
   }
   // monitor->createAndAttachBuffer();
 }
@@ -230,23 +231,16 @@ void Monitor::render() {
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed ");
   }
-  glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
-             static_cast<GLsizei>(m_bufferHeight));
 
-  glMatrixMode(GL_PROJECTION);
-  glLoadIdentity();
-  glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0);
-
-  glMatrixMode(GL_MODELVIEW);
-  glLoadIdentity();
   for (int i = 0; i < 2; ++i) {
-    if (m_images[i] != EGL_NO_IMAGE) {
-      m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_images[i]);
-      m_images[i] = EGL_NO_IMAGE;
+    if (m_eglImages[i] != EGL_NO_IMAGE) {
+      m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_eglImages[i]);
+      m_eglImages[i] = EGL_NO_IMAGE;
     }
   }
   if (!m_wallpaper->decodeNextFrame())
     return;
+
   VASurfaceID va_surface = (uintptr_t)m_wallpaper->m_frame->data[3];
 
   VADRMPRIMESurfaceDescriptor prime;
@@ -263,14 +257,13 @@ void Monitor::render() {
   }
   vaSyncSurface(m_daemon.m_vaDisplay, va_surface);
   float texcoord_x1 = 1.0f, texcoord_y1 = 1.0f;
-  bool texture_size_valid = false;
-  if (!texture_size_valid) {
-    texcoord_x1 = (float)((double)m_wallpaper->m_codecContext->width /
-                          (double)prime.width);
-    texcoord_y1 = (float)((double)m_wallpaper->m_codecContext->height /
-                          (double)prime.height);
-    texture_size_valid = true;
-  }
+  texcoord_x1 =
+      (float)((double)m_wallpaper->m_codecContext->width / (double)prime.width);
+  texcoord_y1 = (float)((double)m_wallpaper->m_codecContext->height /
+                        (double)prime.height);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
+              texcoord_x1, texcoord_y1);
+
   for (int i = 0; i < 2; ++i) {
     static const uint32_t formats[2] = {DRM_FORMAT_R8, DRM_FORMAT_GR88};
 #define LAYER i
@@ -292,10 +285,10 @@ void Monitor::render() {
         EGL_DMA_BUF_PLANE0_PITCH_EXT,
         static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE]),
         EGL_NONE};
-    m_images[i] =
+    m_eglImages[i] =
         m_daemon.eglCreateImageKHR(m_daemon.m_eglDisplay, EGL_NO_CONTEXT,
                                    EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
-    if (!m_images[i]) {
+    if (!m_eglImages[i]) {
       throw std::runtime_error(i ? "chroma eglCreateImageKHR"
                                  : "luma eglCreateImageKHR");
     }
@@ -303,7 +296,7 @@ void Monitor::render() {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
     while (glGetError()) {
     }
-    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_images[i]);
+    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_eglImages[i]);
     if (glGetError()) {
       throw std::runtime_error("glEGLImageTargetTexture2DOES");
     }
@@ -312,24 +305,11 @@ void Monitor::render() {
   for (int i = 0; i < (int)prime.num_objects; ++i) {
     close(prime.objects[i].fd);
   }
-  // draw the frame
+  // draw
   glClear(GL_COLOR_BUFFER_BIT);
-  while (glGetError()) {
-  }
-  glActiveTexture(GL_TEXTURE0);
-  glBegin(GL_QUADS);
-  glTexCoord2f(0.0f, 0.0f);
-  glVertex2i(0, 0);
-  glTexCoord2f(texcoord_x1, 0.0f);
-  glVertex2i(1, 0);
-  glTexCoord2f(texcoord_x1, texcoord_y1);
-  glVertex2i(1, 1);
-  glTexCoord2f(0.0f, texcoord_y1);
-  glVertex2i(0, 1);
-  glEnd();
-  if (glGetError()) {
-    throw std::runtime_error("drawing");
-  }
+  m_daemon.glBindVertexArray(m_VAO);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
     std::cout << eglGetError() << std::endl;
     throw std::runtime_error("eglSwapBuffers failed");
@@ -374,7 +354,7 @@ void Monitor::onFrame() {
   auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
                   now - m_nextVideoFrame)
                   .count();
-  //incase the compositor sends us to sleep
+  // incase the compositor sends us to sleep
   if (diff > 100) {
     m_nextVideoFrame = now;
   }
@@ -421,63 +401,121 @@ void Monitor::onScaleChanged() {
   "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n"                          \
   "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
 
-void Monitor::setupGlShaders() {
+void Monitor::setupGl() {
   if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed during resize");
   }
-  glOrtho(0.0, 1.0, 1.0, 0.0, -1.0, 1.0);
-  const char *vs_src = "void main() {"
-                       "\n"
-                       "    gl_Position = ftransform();"
-                       "\n"
-                       "    gl_TexCoord[0] = gl_MultiTexCoord0;"
-                       "\n"
-                       "}";
-  const char *fs_src = "uniform sampler2D uTexY, uTexC;"
-                       "\n" DECLARE_YUV2RGB_MATRIX_GLSL "\n"
-                       "void main() {"
-                       "\n"
-                       "    gl_FragColor = yuv2rgb * vec4(texture2D(uTexY, "
-                       "gl_TexCoord[0].xy).x, "
-                       "texture2D(uTexC, gl_TexCoord[0].xy).xy, 1.);"
-                       "\n"
-                       "}";
-  GLuint prog = glCreateProgram();
-  GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-  GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
-  if (!prog) {
-    throw std::runtime_error("glCreateProgram failed");
-  }
-  if (!vs || !fs) {
-    throw std::runtime_error("glCreateShader");
-  }
-  glShaderSource(vs, 1, &vs_src, NULL);
-  glShaderSource(fs, 1, &fs_src, NULL);
-  GLint ok;
-  while (glGetError()) {
-  }
-  glCompileShader(vs);
-  glGetShaderiv(vs, GL_COMPILE_STATUS, &ok);
-  if (glGetError() || (ok != GL_TRUE)) {
-    throw std::runtime_error("glCompileShader(GL_VERTEX_SHADER)");
-  }
-  glCompileShader(fs);
-  glGetShaderiv(fs, GL_COMPILE_STATUS, &ok);
-  if (glGetError() || (ok != GL_TRUE)) {
-    throw std::runtime_error("glCompileShader(GL_FRAGMENT_SHADER)");
-  }
-  glAttachShader(prog, vs);
-  glAttachShader(prog, fs);
-  glLinkProgram(prog);
-  if (glGetError()) {
-    throw std::runtime_error("glLinkProgram");
-  }
-  glUseProgram(prog);
-  glUniform1i(glGetUniformLocation(prog, "uTexY"), 0);
-  glUniform1i(glGetUniformLocation(prog, "uTexC"), 1);
+  glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
+             static_cast<GLsizei>(m_bufferHeight));
 
-  // OpenGL texture setup
+  // full sized rectangle
+  float vertices[] = {-1.f, 1.f,  0.f, 0.f, 0.f, -1.f, -1.f, 0.f, 0.f, 1.f,
+                      1.f,  -1.f, 0.f, 1.f, 1.f, 1.f,  1.f,  0.f, 1.f, 0.f};
+
+  u32 indices[] = {0, 1, 2, 2, 3, 0};
+
+  uint32_t VAO;
+  m_daemon.glGenVertexArrays(1, &VAO);
+  m_daemon.glBindVertexArray(VAO);
+  m_VAO = VAO;
+
+  u32 VBO;
+  glGenBuffers(1, &VBO);
+  glBindBuffer(GL_ARRAY_BUFFER, VBO);
+  glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+  u32 EBO;
+  glGenBuffers(1, &EBO);
+  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+  glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
+               GL_STATIC_DRAW);
+
+  const char *vertexShaderSource = R"(
+      #version 330 core
+      layout(location = 0) in vec3 aPos;
+      layout(location = 1) in vec2 aTexCoord;
+
+      uniform vec2 uTexCoordScale;
+
+      out vec2 vTexCoord;
+
+      void main()
+      {
+          gl_Position = vec4(aPos, 1.0);
+          vTexCoord = aTexCoord * uTexCoordScale;
+      }
+      )";
+  u32 vertexShader;
+  vertexShader = glCreateShader(GL_VERTEX_SHADER);
+  glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
+  glCompileShader(vertexShader);
+  {
+
+    GLint success;
+    char infoLog[512];
+
+    glGetShaderiv(vertexShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(vertexShader, 512, nullptr, infoLog);
+      std::cout << infoLog << std::endl;
+    }
+  }
+  const char *fragmentShaderSource =
+      R"(#version 130
+
+      in vec2 vTexCoord;
+
+      uniform sampler2D uTexY;
+      uniform sampler2D uTexC;
+
+      )" DECLARE_YUV2RGB_MATRIX_GLSL
+      R"(
+
+      out vec4 oColor;
+
+      void main()
+      {
+          oColor = yuv2rgb * vec4(
+              texture(uTexY, vTexCoord).x,
+              texture(uTexC, vTexCoord).xy,
+              1.0
+          );
+      }
+      )";
+  u32 fragmentShader;
+  fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+  glCompileShader(fragmentShader);
+  {
+    GLint success;
+    char infoLog[512];
+
+    glGetShaderiv(fragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(fragmentShader, 512, nullptr, infoLog);
+      std::cout << infoLog << std::endl;
+    }
+  }
+  m_glShaderProgram = glCreateProgram();
+  glAttachShader(m_glShaderProgram, vertexShader);
+  glAttachShader(m_glShaderProgram, fragmentShader);
+  glLinkProgram(m_glShaderProgram);
+
+  glUseProgram(m_glShaderProgram);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+  glDeleteShader(vertexShader);
+  glDeleteShader(fragmentShader);
+
+  glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+  glEnableVertexAttribArray(0);
+
+  glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
+                        (void *)(3 * sizeof(float)));
+  glEnableVertexAttribArray(1);
+
+  // texture
   glGenTextures(2, m_textures);
   for (int i = 0; i < 2; ++i) {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
@@ -488,10 +526,7 @@ void Monitor::setupGlShaders() {
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 
-  // initial window size setup
-  GLint vp[4];
-  glGetIntegerv(GL_VIEWPORT, vp);
-  m_shadersSetup = true;
+  m_glSetup = true;
 }
 void Monitor::setPlayPause(bool play) {
   if (play && !m_wallpaperPlaying) {

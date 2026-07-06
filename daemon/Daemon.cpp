@@ -4,6 +4,7 @@
 #include "fractional-scale-v1-client-protocol.h"
 #include "shared/utils.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
+#include <EGL/egl.h>
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
@@ -177,6 +178,7 @@ void Daemon::createEGL() {
     throw std::runtime_error("eglCreateContext failed");
   }
 
+  // locate gl procs
   eglCreateImageKHR = reinterpret_cast<PFNEGLCREATEIMAGEKHRPROC>(
       eglGetProcAddress("eglCreateImageKHR"));
   eglDestroyImageKHR = reinterpret_cast<PFNEGLDESTROYIMAGEKHRPROC>(
@@ -184,9 +186,14 @@ void Daemon::createEGL() {
   glEGLImageTargetTexture2DOES =
       reinterpret_cast<PFNGLEGLIMAGETARGETTEXTURE2DOESPROC>(
           eglGetProcAddress("glEGLImageTargetTexture2DOES"));
+  glGenVertexArrays = reinterpret_cast<PFNGLGENVERTEXARRAYSPROC>(
+      eglGetProcAddress("glGenVertexArrays"));
+  glBindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
+      eglGetProcAddress("glBindVertexArray"));
 
-if (!eglCreateImageKHR || !eglDestroyImageKHR || !glEGLImageTargetTexture2DOES) {
-    throw std::runtime_error(
-        "missing EGL_KHR_image_base / EGL_EXT_image_dma_buf_import / "
-        "GL_OES_EGL_image_external support");
-}}
+  if (!eglCreateImageKHR || !eglDestroyImageKHR ||
+      !glEGLImageTargetTexture2DOES || !glBindVertexArray ||
+      !glGenVertexArrays) {
+    throw std::runtime_error("Missing GL procs");
+  }
+}
