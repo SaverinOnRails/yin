@@ -232,7 +232,8 @@ void Monitor::render() {
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed ");
   }
-
+  glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
+             static_cast<GLsizei>(m_bufferHeight));
   for (int i = 0; i < 2; ++i) {
     if (m_eglImages[i] != EGL_NO_IMAGE) {
       m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_eglImages[i]);
