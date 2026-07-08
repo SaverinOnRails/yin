@@ -18,7 +18,7 @@
 class Monitor;
 class Daemon {
 public:
-  Daemon();
+  Daemon(HardwareAccelerationBackend hab);
   ~Daemon();
   void bindGlobal(struct wl_registry *registry, uint32_t name,
                   const char *interface, uint32_t version);
@@ -35,12 +35,13 @@ public:
   EGLConfig m_eglConfig = nullptr;
   EGLContext m_eglContext = EGL_NO_CONTEXT;
   std::vector<std::unique_ptr<Monitor>> m_monitors;
-  VADisplay m_vaDisplay;
+  VADisplay m_vaDisplay = nullptr;
   PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR = nullptr;
   PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR = nullptr;
   PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES = nullptr;
   PFNGLGENVERTEXARRAYSPROC glGenVertexArrays = nullptr;
   PFNGLBINDVERTEXARRAYPROC glBindVertexArray = nullptr;
+  HardwareAccelerationBackend m_hardwareAccelerationBackend = Vaapi;
 
 private:
   wl_compositor *m_waylandCompositor;

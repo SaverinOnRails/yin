@@ -12,6 +12,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -23,6 +25,10 @@
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
+
+#ifdef ENABLE_CUDA
+#include <cuda.h>
+#endif
 
 static void output_done(void *data, struct wl_output *wl_output) {
   auto monitor = static_cast<Monitor *>(data);
@@ -228,13 +234,15 @@ void Monitor::resizeEGL() {
 }
 
 void Monitor::render() {
-
   if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
                      m_daemon.m_eglContext) != EGL_TRUE) {
     throw std::runtime_error("eglMakeCurrent failed ");
   }
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
+
+  // destory old egl images, this is safe to do even if the images are null for
+  // some reason
   for (int i = 0; i < 2; ++i) {
     if (m_eglImages[i] != EGL_NO_IMAGE) {
       m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_eglImages[i]);
@@ -243,9 +251,121 @@ void Monitor::render() {
   }
   if (!m_wallpaper->decodeNextFrame())
     return;
+  if (m_wallpaper->m_frame->format == AV_PIX_FMT_VAAPI) {
+    renderVAAPI();
+  } else if (m_wallpaper->m_frame->format == AV_PIX_FMT_CUDA) {
+    renderCUDACopy();
+  } else {
+    // maybe software here
+  }
+}
 
+void Monitor::stageNV12Buffers(u32 width, u32 height) {
+  m_hostY.resize(static_cast<size_t>(width) * height);
+  m_hostUV.resize(static_cast<size_t>(width) * (height / 2));
+
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
+               GL_UNSIGNED_BYTE, nullptr);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void Monitor::renderCUDACopy() {
+  cudaNV12GLUpload(m_wallpaper->m_frame);
+
+  glUseProgram(m_glShaderProgram);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
+              1.0f);
+  m_daemon.glBindVertexArray(m_VAO);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]); // Y -> uTexY
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]); // UV -> uTexC
+
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
+    throw std::runtime_error("eglSwapBuffers failed");
+  }
+}
+
+#ifdef ENABLE_CUDA
+void Monitor::cudaNV12GLUpload(AVFrame *frame) {
+  int width = frame->width;
+  int height = frame->height;
+
+  if (m_hostY.size() != static_cast<size_t>(width) * height) {
+    stageNV12Buffers(width, height);
+  }
+  m_wallpaper->makeCudaContextCurrent();
+  {
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+    copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[0]);
+    copy.srcPitch = frame->linesize[0];
+
+    copy.dstMemoryType = CU_MEMORYTYPE_HOST;
+    copy.dstHost = m_hostY.data();
+    copy.dstPitch = width;
+
+    copy.WidthInBytes = width;
+    copy.Height = height;
+    CUresult res = cuMemcpy2D(&copy);
+    if (res != CUDA_SUCCESS) {
+      const char *errName = nullptr;
+      const char *errStr = nullptr;
+      cuGetErrorName(res, &errName);
+      cuGetErrorString(res, &errStr);
+      std::cerr << "cuMemcpy2D (Y plane) failed: "
+                << (errName ? errName : "unknown") << " - "
+                << (errStr ? errStr : "no description") << std::endl;
+      throw std::runtime_error("CUDA memcopy of Y plane failed");
+    }
+  }
+  {
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+    copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[1]);
+    copy.srcPitch = frame->linesize[1];
+    copy.dstMemoryType = CU_MEMORYTYPE_HOST; // <-- fixed
+    copy.dstHost = m_hostUV.data();
+    copy.dstPitch = width;
+    copy.WidthInBytes = width;
+    copy.Height = height / 2;
+    CUresult res = cuMemcpy2D(&copy);
+    if (res != CUDA_SUCCESS) {
+      const char *errName = nullptr;
+      const char *errStr = nullptr;
+      cuGetErrorName(res, &errName);
+      cuGetErrorString(res, &errStr);
+      std::cerr << "cuMemcpy2D (UV plane) failed: "
+                << (errName ? errName : "unknown") << " - "
+                << (errStr ? errStr : "no description") << std::endl;
+      throw std::runtime_error("CUDA memcopy of UV plane failed");
+    }
+  }
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED,
+                  GL_UNSIGNED_BYTE, m_hostY.data());
+
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width / 2, height / 2, GL_RG,
+                  GL_UNSIGNED_BYTE, m_hostUV.data());
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+#endif
+
+void Monitor::renderVAAPI() {
   VASurfaceID va_surface = (uintptr_t)m_wallpaper->m_frame->data[3];
-
   VADRMPRIMESurfaceDescriptor prime;
   if (vaExportSurfaceHandle(m_daemon.m_vaDisplay, va_surface,
                             VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
@@ -330,7 +450,8 @@ std::filesystem::path Monitor::historyFile() {
 WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
   m_wallpaperPlaying = true;
-  auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
+  auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay,
+                                 m_daemon.m_hardwareAccelerationBackend);
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
     m_wallpaperID++;

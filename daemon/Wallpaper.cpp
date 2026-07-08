@@ -3,22 +3,34 @@
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
+
+#ifdef ENABLE_CUDA
+#include <libavutil/hwcontext_cuda.h>
+#endif
+
 #include <libavutil/hwcontext_vaapi.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/rational.h>
 #include <va/va.h>
 
+static AVPixelFormat HWDEC_PIXEL_FORMAT = AV_PIX_FMT_VAAPI;
 static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
                                         const enum AVPixelFormat *pix_fmts) {
   // for (const enum AVPixelFormat *p = pix_fmts; *p != AV_PIX_FMT_NONE; p++) {
   //   if (*p == AV_PIX_FMT_VAAPI)
   //     return *p;
   // }
-  return AV_PIX_FMT_VAAPI;
+  return HWDEC_PIXEL_FORMAT;
 }
 
-WallpaperBindError Wallpaper::bind(std::string_view path,
-                                   VADisplay va_display) {
+WallpaperBindError Wallpaper::bind(std::string_view path, VADisplay va_display,
+                                   HardwareAccelerationBackend backend) {
+  if (backend == Vaapi) {
+    HWDEC_PIXEL_FORMAT = AV_PIX_FMT_VAAPI;
+  } else if (backend == CudaCopy) {
+    HWDEC_PIXEL_FORMAT = AV_PIX_FMT_CUDA;
+  } else {
+  }
   if (avformat_open_input(&m_formatContext, path.data(), nullptr, nullptr) < 0)
     return BadVideo;
 
@@ -55,16 +67,36 @@ WallpaperBindError Wallpaper::bind(std::string_view path,
   }
 
   // Allocate hardware device context
-  m_hwDeviceContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
-  if (!m_hwDeviceContext)
-    return NoHarwareDecoding;
+  if (backend == Vaapi) {
+    m_hwDeviceContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
+    if (!m_hwDeviceContext)
+      return NoHarwareDecoding;
 
-  auto *hwctx = reinterpret_cast<AVHWDeviceContext *>(m_hwDeviceContext->data);
-  auto *vaapi = reinterpret_cast<AVVAAPIDeviceContext *>(hwctx->hwctx);
+    auto *hwctx =
+        reinterpret_cast<AVHWDeviceContext *>(m_hwDeviceContext->data);
+    auto *vaapi = reinterpret_cast<AVVAAPIDeviceContext *>(hwctx->hwctx);
 
-  vaapi->display = va_display;
+    vaapi->display = va_display;
+  } else if (backend == CudaCopy) {
 
-  // Initialize the VAAPI device
+#ifdef ENABLE_CUDA
+    AVBufferRef *hw_device_ctx = nullptr;
+    int err = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA,
+                                     nullptr, nullptr, 0);
+    if (err < 0)
+      return NoHarwareDecoding;
+    m_hwDeviceContext = hw_device_ctx;
+    m_codecContext->hw_device_ctx = av_buffer_ref(m_hwDeviceContext);
+    if (!m_codecContext->hw_device_ctx)
+      return NoHarwareDecoding;
+    m_codecContext->get_format = get_hw_format;
+    auto *hwctx =
+        reinterpret_cast<AVHWDeviceContext *>(m_hwDeviceContext->data);
+    auto *cuda = reinterpret_cast<AVCUDADeviceContext *>(hwctx->hwctx);
+    m_cudaContext = cuda->cuda_ctx;
+#endif
+  }
+  // Initialize the HW device
   if (av_hwdevice_ctx_init(m_hwDeviceContext) < 0)
     return NoHarwareDecoding;
 
@@ -137,4 +169,14 @@ Wallpaper::~Wallpaper() {
   avcodec_free_context(&m_codecContext);
   avformat_close_input(&m_formatContext);
   av_buffer_unref(&m_hwDeviceContext);
+
+#ifdef ENABLE_CUDA
+  if (m_cudaContext != nullptr) {
+    cuCtxDestroy(m_cudaContext);
+  }
+#endif
 }
+
+#ifdef ENABLE_CUDA
+void Wallpaper::makeCudaContextCurrent() { cuCtxSetCurrent(m_cudaContext); }
+#endif

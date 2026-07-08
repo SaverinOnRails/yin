@@ -54,16 +54,24 @@ private:
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
-  bool m_wallpaperPlaying = true; //this just means not paused
+  bool m_wallpaperPlaying = true; // this just means not paused
   void setBufferSize();
   std::filesystem::path historyFile();
+  void cudaNV12GLUpload(AVFrame *frame);
+  void stageNV12Buffers(u32 width, u32 height);
 
-  //GL STATE
+  // software data for cuda and eventually generic nv12 stuff
+  std::vector<uint8_t> m_hostY;
+  std::vector<uint8_t> m_hostUV;
+
+   // GL STATE
   GLuint m_textures[2];
   EGLImage m_eglImages[2];
   u32 m_VAO;
   GLuint m_glShaderProgram;
   void render();
+  void renderVAAPI();
+  void renderCUDACopy();
 };
 
 struct FrameCallbackData {

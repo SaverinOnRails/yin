@@ -15,7 +15,10 @@
 #include <va/va_wayland.h>
 #include <wayland-client-core.h>
 #include <wayland-client-protocol.h>
-Daemon::Daemon() { initWayland(); }
+Daemon::Daemon(HardwareAccelerationBackend hab)
+    : m_hardwareAccelerationBackend(hab) {
+  initWayland();
+}
 Daemon::~Daemon() {}
 
 static void handle_global(void *data, struct wl_registry *registry,
@@ -47,8 +50,10 @@ void Daemon::initWayland() {
   if (wl_display_roundtrip(m_waylandDisplay) < 0) {
     throw std::runtime_error("Failed to roundtrip wayland display");
   }
-  if (vaInitialize(m_vaDisplay, &major, &minor) != VA_STATUS_SUCCESS) {
-    throw std::runtime_error("Failed to init VA display");
+  if (m_hardwareAccelerationBackend == Vaapi) {
+    if (vaInitialize(m_vaDisplay, &major, &minor) != VA_STATUS_SUCCESS) {
+      throw std::runtime_error("Failed to init VA display");
+    }
   }
   ensureGlobals();
 }
