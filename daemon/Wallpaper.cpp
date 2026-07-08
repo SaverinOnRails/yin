@@ -3,7 +3,7 @@
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
-#include <libavutil/hwcontext_vaapi.h>
+#include <libavutil/hwcontext_cuda.h>
 #include <libavutil/pixfmt.h>
 #include <libavutil/rational.h>
 #include <va/va.h>
@@ -14,7 +14,7 @@ static enum AVPixelFormat get_hw_format(AVCodecContext *ctx,
   //   if (*p == AV_PIX_FMT_VAAPI)
   //     return *p;
   // }
-  return AV_PIX_FMT_VAAPI;
+  return AV_PIX_FMT_CUDA;
 }
 
 WallpaperBindError Wallpaper::bind(std::string_view path,
@@ -55,17 +55,20 @@ WallpaperBindError Wallpaper::bind(std::string_view path,
   }
 
   // Allocate hardware device context
-  m_hwDeviceContext = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_VAAPI);
-  if (!m_hwDeviceContext)
+  AVBufferRef *hw_device_ctx = nullptr;
+  int err = av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA,
+                                   nullptr, nullptr, 0);
+  if (err < 0)
     return NoHarwareDecoding;
-
+  m_hwDeviceContext = hw_device_ctx;
+  m_codecContext->hw_device_ctx = av_buffer_ref(m_hwDeviceContext);
+  if (!m_codecContext->hw_device_ctx)
+    return NoHarwareDecoding;
+  m_codecContext->get_format = get_hw_format;
   auto *hwctx = reinterpret_cast<AVHWDeviceContext *>(m_hwDeviceContext->data);
-  auto *vaapi = reinterpret_cast<AVVAAPIDeviceContext *>(hwctx->hwctx);
-
-  vaapi->display = va_display;
-
-  // Initialize the VAAPI device
-  if (av_hwdevice_ctx_init(m_hwDeviceContext) < 0)
+  auto *cuda = reinterpret_cast<AVCUDADeviceContext *>(hwctx->hwctx);
+  m_cudaContext = cuda->cuda_ctx;
+  if (avcodec_open2(m_codecContext, m_codec, nullptr) < 0)
     return NoHarwareDecoding;
 
   // Attach to decoder
@@ -137,4 +140,9 @@ Wallpaper::~Wallpaper() {
   avcodec_free_context(&m_codecContext);
   avformat_close_input(&m_formatContext);
   av_buffer_unref(&m_hwDeviceContext);
+  if (m_cudaContext != nullptr) {
+    cuCtxDestroy(m_cudaContext);
+  }
 }
+
+void Wallpaper::makeCudaContextCurrent() { cuCtxSetCurrent(m_cudaContext); }

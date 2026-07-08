@@ -8,10 +8,14 @@
 #include <cassert>
 #include <chrono>
 #include <cstdint>
+#include <cuda.h>
+#include <cuda_gl_interop.h>
 #include <drm/drm_fourcc.h>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <libavutil/frame.h>
+#include <libavutil/pixfmt.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -235,83 +239,24 @@ void Monitor::render() {
   }
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
-  for (int i = 0; i < 2; ++i) {
-    if (m_eglImages[i] != EGL_NO_IMAGE) {
-      m_daemon.eglDestroyImageKHR(m_daemon.m_eglDisplay, m_eglImages[i]);
-      m_eglImages[i] = EGL_NO_IMAGE;
-    }
-  }
   if (!m_wallpaper->decodeNextFrame())
     return;
 
-  VASurfaceID va_surface = (uintptr_t)m_wallpaper->m_frame->data[3];
+  auto frame = m_wallpaper->m_frame->data[0];
+  cudaNV12GLUpload(m_wallpaper->m_frame);
 
-  VADRMPRIMESurfaceDescriptor prime;
-  if (vaExportSurfaceHandle(m_daemon.m_vaDisplay, va_surface,
-                            VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
-                            VA_EXPORT_SURFACE_READ_ONLY |
-                                VA_EXPORT_SURFACE_SEPARATE_LAYERS,
-                            &prime) != VA_STATUS_SUCCESS) {
-    std::cout << "vaExportSurfaceHandle failed";
-  }
-  if (prime.fourcc != VA_FOURCC_NV12) {
-    std::cout << "export format check failed";
-    ; // we only support NV12 here
-  }
-  vaSyncSurface(m_daemon.m_vaDisplay, va_surface);
-  float texcoord_x1 = 1.0f, texcoord_y1 = 1.0f;
-  texcoord_x1 =
-      (float)((double)m_wallpaper->m_codecContext->width / (double)prime.width);
-  texcoord_y1 = (float)((double)m_wallpaper->m_codecContext->height /
-                        (double)prime.height);
   glUseProgram(m_glShaderProgram);
-  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
-              texcoord_x1, texcoord_y1);
-
-  for (int i = 0; i < 2; ++i) {
-    static const uint32_t formats[2] = {DRM_FORMAT_R8, DRM_FORMAT_GR88};
-#define LAYER i
-#define PLANE 0
-    if (prime.layers[i].drm_format != formats[i]) {
-      throw std::runtime_error("expected DRM format check");
-    }
-    EGLint img_attr[] = {
-        EGL_LINUX_DRM_FOURCC_EXT,
-        static_cast<EGLint>(formats[i]),
-        EGL_WIDTH,
-        static_cast<EGLint>(prime.width / (i + 1)), // half size
-        EGL_HEIGHT,
-        static_cast<EGLint>(prime.height / (i + 1)), // for chroma
-        EGL_DMA_BUF_PLANE0_FD_EXT,
-        prime.objects[prime.layers[LAYER].object_index[PLANE]].fd,
-        EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-        static_cast<EGLint>(prime.layers[LAYER].offset[PLANE]),
-        EGL_DMA_BUF_PLANE0_PITCH_EXT,
-        static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE]),
-        EGL_NONE};
-    m_eglImages[i] =
-        m_daemon.eglCreateImageKHR(m_daemon.m_eglDisplay, EGL_NO_CONTEXT,
-                                   EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
-    if (!m_eglImages[i]) {
-      throw std::runtime_error(i ? "chroma eglCreateImageKHR"
-                                 : "luma eglCreateImageKHR");
-    }
-    glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, m_textures[i]);
-    while (glGetError()) {
-    }
-    m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_eglImages[i]);
-    if (glGetError()) {
-      throw std::runtime_error("glEGLImageTargetTexture2DOES");
-    }
-  }
-
-  for (int i = 0; i < (int)prime.num_objects; ++i) {
-    close(prime.objects[i].fd);
-  }
-  // draw
-  glClear(GL_COLOR_BUFFER_BIT);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
+              1.0f);
   m_daemon.glBindVertexArray(m_VAO);
+
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]); // Y -> uTexY
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]); // UV -> uTexC
+
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
@@ -331,6 +276,7 @@ WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
   m_wallpaperPlaying = true;
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay);
+
   if (error == Success) {
     m_nextVideoFrame = std::chrono::steady_clock::now();
     m_wallpaperID++;
@@ -535,6 +481,87 @@ void Monitor::setupGl() {
 
   m_glSetup = true;
 }
+
+void Monitor::stageNV12Buffers(u32 width, u32 height) {
+  m_hostY.resize(static_cast<size_t>(width) * height);
+  m_hostUV.resize(static_cast<size_t>(width) * (height / 2));
+
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
+               GL_UNSIGNED_BYTE, nullptr);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+void Monitor::cudaNV12GLUpload(AVFrame *frame) {
+
+  int width = frame->width;
+  int height = frame->height;
+
+  if (m_hostY.size() != static_cast<size_t>(width) * height) {
+    stageNV12Buffers(width, height);
+  }
+  m_wallpaper->makeCudaContextCurrent();
+
+  {
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+    copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[0]);
+    copy.srcPitch = frame->linesize[0];
+
+    copy.dstMemoryType = CU_MEMORYTYPE_HOST;
+    copy.dstHost = m_hostY.data();
+    copy.dstPitch = width;
+
+    copy.WidthInBytes = width;
+    copy.Height = height;
+    CUresult res = cuMemcpy2D(&copy);
+    if (res != CUDA_SUCCESS) {
+      const char *errName = nullptr;
+      const char *errStr = nullptr;
+      cuGetErrorName(res, &errName);
+      cuGetErrorString(res, &errStr);
+      std::cerr << "cuMemcpy2D (Y plane) failed: "
+                << (errName ? errName : "unknown") << " - "
+                << (errStr ? errStr : "no description") << std::endl;
+      throw std::runtime_error("CUDA memcopy of Y plane failed");
+    }
+  }
+  {
+    CUDA_MEMCPY2D copy = {};
+    copy.srcMemoryType = CU_MEMORYTYPE_DEVICE;
+    copy.srcDevice = reinterpret_cast<CUdeviceptr>(frame->data[1]);
+    copy.srcPitch = frame->linesize[1];
+    copy.dstMemoryType = CU_MEMORYTYPE_HOST; // <-- fixed
+    copy.dstHost = m_hostUV.data();
+    copy.dstPitch = width;
+    copy.WidthInBytes = width;
+    copy.Height = height / 2;
+    CUresult res = cuMemcpy2D(&copy);
+    if (res != CUDA_SUCCESS) {
+      const char *errName = nullptr;
+      const char *errStr = nullptr;
+      cuGetErrorName(res, &errName);
+      cuGetErrorString(res, &errStr);
+      std::cerr << "cuMemcpy2D (UV plane) failed: "
+                << (errName ? errName : "unknown") << " - "
+                << (errStr ? errStr : "no description") << std::endl;
+      throw std::runtime_error("CUDA memcopy of UV plane failed");
+    }
+  }
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED,
+                  GL_UNSIGNED_BYTE, m_hostY.data());
+
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width / 2, height / 2, GL_RG,
+                  GL_UNSIGNED_BYTE, m_hostUV.data());
+
+  glBindTexture(GL_TEXTURE_2D, 0);
+}
+
 void Monitor::setPlayPause(bool play) {
   if (play && !m_wallpaperPlaying) {
     m_nextVideoFrame =

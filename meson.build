@@ -12,6 +12,15 @@ wayland_scanner = dependency('wayland-scanner', version: '>=1.14.91', native: tr
 wayland_protos = dependency('wayland-protocols', version: '>=1.31')
 wayland_scanner_prog = find_program(wayland_scanner.get_variable('wayland_scanner'), native: true)
 
+cpp = meson.get_compiler('cpp')
+
+cuda_inc = include_directories('/opt/cuda/include')
+
+cuda = cpp.find_library(
+  'cuda',
+  dirs: ['/opt/cuda/lib64', '/usr/lib'],
+  required: true
+)
 
 wayland_scanner_code = generator(
 	wayland_scanner_prog,
@@ -38,6 +47,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:[wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,va_wayland])
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:[wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,va_wayland,cuda], include_directories:[cuda_inc])
 
  executable('yinctl' , ['client/main.cpp' , 'client/IPC_Client.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp']  )

@@ -9,7 +9,9 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <GLES2/gl2.h>
+#include <cuda.h>
 #include <filesystem>
+#include <libavutil/frame.h>
 #include <memory>
 #include <string>
 #include <wayland-client-protocol.h>
@@ -54,15 +56,21 @@ private:
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
-  bool m_wallpaperPlaying = true; //this just means not paused
+  bool m_wallpaperPlaying = true; // this just means not paused
   void setBufferSize();
   std::filesystem::path historyFile();
 
-  //GL STATE
+  // GL STATE
   GLuint m_textures[2];
   EGLImage m_eglImages[2];
   u32 m_VAO;
   GLuint m_glShaderProgram;
+  void cudaNV12GLUpload(AVFrame * frame);
+  void stageNV12Buffers(u32 width, u32 height);
+
+  // software data for cuda
+  std::vector<uint8_t> m_hostY;
+  std::vector<uint8_t> m_hostUV;
   void render();
 };
 
