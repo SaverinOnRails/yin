@@ -1,0 +1,6 @@
+option(
+  'enable_cuda',
+  type: 'boolean',
+  value: false,
+  description: 'Enable Hardware Acceleration on Nvidia with CUDA'
+)
