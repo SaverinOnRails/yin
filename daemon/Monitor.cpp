@@ -254,7 +254,9 @@ void Monitor::render() {
   if (m_wallpaper->m_frame->format == AV_PIX_FMT_VAAPI) {
     renderVAAPI();
   } else if (m_wallpaper->m_frame->format == AV_PIX_FMT_CUDA) {
+#ifdef ENABLE_CUDA
     renderCUDACopy();
+#endif
   } else {
     // maybe software here
   }
@@ -274,6 +276,7 @@ void Monitor::stageNV12Buffers(u32 width, u32 height) {
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
+#ifdef ENABLE_CUDA
 void Monitor::renderCUDACopy() {
   cudaNV12GLUpload(m_wallpaper->m_frame);
 
@@ -296,8 +299,6 @@ void Monitor::renderCUDACopy() {
     throw std::runtime_error("eglSwapBuffers failed");
   }
 }
-
-#ifdef ENABLE_CUDA
 void Monitor::cudaNV12GLUpload(AVFrame *frame) {
   int width = frame->width;
   int height = frame->height;
