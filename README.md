@@ -18,6 +18,9 @@ meson setup release --buildtype=release
 meson compile -C release
 sudo cp release/yin /usr/bin
 sudo cp release/yinctl /usr/bin
+
+# For nvidia support
+meson setup release -Denable_cuda=true --buildtype=release
 ```
 in the project directory.
 
@@ -26,6 +29,9 @@ in the project directory.
 Yin is also available in the AUR:
 ```
 yay -S yin-git
+
+For Nvidia support(will unfortunately pull in cuda to build)
+yay -S yin-nvidia-git
 ```
 
 ## Usage
@@ -48,13 +54,18 @@ https://github.com/user-attachments/assets/552923ae-e535-4461-a34f-fb7d5c7c057a
 - Multi monitor support
 - Runtime pause and play commands
 
-# Limitations
-There is currently no software rendering fallback should hardware decoding fail. Which means if your video drivers are not properly configured you cannot use yin. You can setup your display drivers correctly for your distro.
+# Important
+There is currently no software rendering fallback for videos should hardware decoding fail. Which means if your video drivers are not properly configured you cannot use yin. You can setup your display drivers correctly for your distro.
 For example with intel on arch linux:
 ```
 sudo pacman -S mesa libva-intel-driver intel-media-driver
 ```
 
-Nvidia currently might NOT WORK with yin, i'm still trying to figure that out, if you know anything about using NVDEC or the tweaking the code to work with the nvidia vaapi driver, please contribute. 
+# Nvidia
+Yin supports nvidia, it will decode videos on the appropriate gpu, but unlike the VAAPI implementation, it is not zero copy so there is some extra CPU usage. To use yin with Nvidia , first ensure you have compiled yin with Nvidia support( follow instructions above). And then explicitly instruct yin to use it on startup:
+```
+yin --use-cuda-copy
+```
+It SHOULD work afterwards, there is an issue concerining implementing zero copy NVDEC support.
 
 
