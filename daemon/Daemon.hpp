@@ -42,6 +42,7 @@ public:
   PFNGLGENVERTEXARRAYSPROC glGenVertexArrays = nullptr;
   PFNGLBINDVERTEXARRAYPROC glBindVertexArray = nullptr;
   HardwareAccelerationBackend m_hardwareAccelerationBackend = Vaapi;
+  bool useTransitions = true;
 
 private:
   wl_compositor *m_waylandCompositor;

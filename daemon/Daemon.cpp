@@ -42,8 +42,10 @@ void Daemon::initWayland() {
     throw std::runtime_error("Could not connect to a Wayland Compositor");
   }
   createEGL();
-  m_vaDisplay = vaGetDisplayWl(m_waylandDisplay);
-  assert(m_vaDisplay != nullptr);
+  if (m_hardwareAccelerationBackend == Vaapi) {
+    m_vaDisplay = vaGetDisplayWl(m_waylandDisplay);
+    assert(m_vaDisplay != nullptr);
+  }
   int major, minor;
   auto wl_registry = wl_display_get_registry(m_waylandDisplay);
   wl_registry_add_listener(wl_registry, &registry_listener, this);
