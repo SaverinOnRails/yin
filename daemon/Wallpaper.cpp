@@ -1,7 +1,6 @@
 #include "daemon/Wallpaper.hpp"
 #include <chrono>
 #include <filesystem>
-#include <iostream>
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
@@ -45,8 +44,11 @@ WallpaperBindError Wallpaper::bind(std::string_view path, VADisplay va_display,
 
   // It's possible the video codec can't be hardware decoded by the driver,
   // that's probably unlikely for most videos so i'm gonna ignore that for now.
-  // But images and gifs should be software decoded. Rough check
+  // But images should be software decoded. Rough check
   auto ext = std::filesystem::path(path).extension();
+  if (ext == ".gif" || ext == ".GIF") {
+    return BadVideo;
+  }
   if (m_videoStream < 0)
     return BadVideo;
 
