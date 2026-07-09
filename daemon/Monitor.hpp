@@ -73,9 +73,10 @@ private:
   std::vector<uint8_t> m_hostUV;
 
   // GL STATE
-  GLuint m_textures[2];
-  GLuint m_tempTextures[2]; // for transition
-  EGLImage m_eglImages[2];
+  GLuint m_textures[2]; //current display texture
+  // GLuint m_toTextures[2]; // textures we are transitioning to
+  // GLuint m_fromTextures[2]; //textures we are tranisition from
+  EGLImage m_eglImages[2]; //this is used for VAAPI ONLY
   u32 m_VAO;
   GLuint m_glShaderProgram;
   void render();
@@ -88,6 +89,7 @@ private:
   bool m_isFirstAnimationFrame = false;
   bool m_hasPreviousFrame = false;
   bool m_renderIntoTempTexture = false;
+  bool useTransitions = true;
   std::unique_ptr<TransitionState> m_transitionState = nullptr;
 };
 

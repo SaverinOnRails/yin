@@ -1,4 +1,5 @@
 #include "daemon/Monitor.hpp"
+#include "Shaders.hpp"
 #include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -126,6 +127,7 @@ void Monitor::setName(const char *name) { m_name = name; }
 zwlr_layer_surface_v1 *Monitor::getLayerSurface() { return m_layerSurface; }
 
 void Monitor::createLayerSurface() {
+  std::cout << "creating layer surface" <<  std::endl;
   m_waylandSurface = wl_compositor_create_surface(m_daemon.getCompositor());
   assert(m_waylandSurface);
   auto input_region = wl_compositor_create_region(m_daemon.getCompositor());
@@ -251,17 +253,27 @@ void Monitor::render() {
   }
 
   bool startTransition = false;
-  // can we kick off a transition here
-  if (m_isFirstAnimationFrame && m_hasPreviousFrame) {
+
+  // kickoff transition if we can?
+  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions) {
     startTransition = true;
     m_renderIntoTempTexture = true;
     std::cout << "can kickof transition here" << std::endl;
+    int w = m_wallpaper->m_codecContext->width;
+    int h = m_wallpaper->m_codecContext->height;
+    for (int i = 0; i < 2; ++i) {
+      int pw = i ? w / 2 : w;
+      int ph = i ? h / 2 : h;
+      // m_daemon.glCopyImageSubData(m_textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
+      //                    m_fromTextures[i], GL_TEXTURE_2D, 0, 0, 0, 0, pw, ph,
+      //                    1);
+    }
   }
-  if(m_transitionState != nullptr) {
+  if (m_transitionState != nullptr) {
     continueTransition();
     return;
   }
-  
+
   m_isFirstAnimationFrame = false;
   if (!m_wallpaper->m_isSingleFrame && !m_wallpaper->decodeNextFrame())
     return;
@@ -283,9 +295,7 @@ void Monitor::render() {
   }
 }
 
-void Monitor::continueTransition() {
-  
-}
+void Monitor::continueTransition() {}
 
 void Monitor::stageNV12Buffers(u32 width, u32 height) {
   m_hostY.resize(static_cast<size_t>(width) * height);
@@ -483,7 +493,7 @@ void Monitor::renderVAAPI() {
     }
     glActiveTexture(GL_TEXTURE0 + i);
     glBindTexture(GL_TEXTURE_2D, m_renderIntoTempTexture == true
-                                     ? m_tempTextures[i]
+                                     ? m_toTextures[i]
                                      : m_textures[i]);
     while (glGetError()) {
     }
@@ -591,14 +601,6 @@ void Monitor::onScaleChanged() {
   wl_surface_commit(m_waylandSurface);
 }
 
-// https://gist.github.com/kajott/d1b29c613be30893c855621edd1f212e
-#define DECLARE_YUV2RGB_MATRIX_GLSL                                            \
-  "const mat4 yuv2rgb = mat4(\n"                                               \
-  "    vec4(  1.1644,  1.1644,  1.1644,  0.0000 ),\n"                          \
-  "    vec4(  0.0000, -0.2132,  2.1124,  0.0000 ),\n"                          \
-  "    vec4(  1.7927, -0.5329,  0.0000,  0.0000 ),\n"                          \
-  "    vec4( -0.9729,  0.3015, -1.1334,  1.0000 ));"
-
 void Monitor::setupGl() {
   if (eglMakeCurrent(m_daemon.m_eglDisplay, m_eglSurface, m_eglSurface,
                      m_daemon.m_eglContext) != EGL_TRUE) {
@@ -629,24 +631,9 @@ void Monitor::setupGl() {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices,
                GL_STATIC_DRAW);
 
-  const char *vertexShaderSource = R"(
-      #version 330 core
-      layout(location = 0) in vec3 aPos;
-      layout(location = 1) in vec2 aTexCoord;
-
-      uniform vec2 uTexCoordScale;
-
-      out vec2 vTexCoord;
-
-      void main()
-      {
-          gl_Position = vec4(aPos, 1.0);
-          vTexCoord = aTexCoord * uTexCoordScale;
-      }
-      )";
   u32 vertexShader;
   vertexShader = glCreateShader(GL_VERTEX_SHADER);
-  glShaderSource(vertexShader, 1, &vertexShaderSource, NULL);
+  glShaderSource(vertexShader, 1, &vertexShaderSourceMain, NULL);
   glCompileShader(vertexShader);
   {
 
@@ -659,31 +646,9 @@ void Monitor::setupGl() {
       std::cout << infoLog << std::endl;
     }
   }
-  const char *fragmentShaderSource =
-      R"(#version 130
-
-      in vec2 vTexCoord;
-
-      uniform sampler2D uTexY;
-      uniform sampler2D uTexC;
-
-      )" DECLARE_YUV2RGB_MATRIX_GLSL
-      R"(
-
-      out vec4 oColor;
-
-      void main()
-      {
-          oColor = yuv2rgb * vec4(
-              texture(uTexY, vTexCoord).x,
-              texture(uTexC, vTexCoord).xy,
-              1.0
-          );
-      }
-      )";
   u32 fragmentShader;
   fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(fragmentShader, 1, &fragmentShaderSource, NULL);
+  glShaderSource(fragmentShader, 1, &fragmentShaderSourceMain, NULL);
   glCompileShader(fragmentShader);
   {
     GLint success;
@@ -715,6 +680,7 @@ void Monitor::setupGl() {
 
   // texture
   glGenTextures(2, m_textures);
+  glGenTextures(2, m_toTextures);
   for (int i = 0; i < 2; ++i) {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -722,11 +688,17 @@ void Monitor::setupGl() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    glBindTexture(GL_TEXTURE_2D, m_tempTextures[i]);
+    glBindTexture(GL_TEXTURE_2D, m_toTextures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // glBindTexture(GL_TEXTURE_2D, m_fromTextures[i]);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 

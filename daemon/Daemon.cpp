@@ -197,10 +197,11 @@ void Daemon::createEGL() {
       eglGetProcAddress("glGenVertexArrays"));
   glBindVertexArray = reinterpret_cast<PFNGLBINDVERTEXARRAYPROC>(
       eglGetProcAddress("glBindVertexArray"));
-
+  glCopyImageSubData = reinterpret_cast<PFNGLCOPYIMAGESUBDATAPROC>(
+      eglGetProcAddress("glCopyImageSubData"));
   if (!eglCreateImageKHR || !eglDestroyImageKHR ||
       !glEGLImageTargetTexture2DOES || !glBindVertexArray ||
-      !glGenVertexArrays) {
+      !glGenVertexArrays || !glCopyImageSubData) {
     throw std::runtime_error("Missing GL procs");
   }
 }
