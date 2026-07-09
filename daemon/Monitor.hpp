@@ -16,7 +16,6 @@
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
-class Daemon;
 
 struct TransitionState {
   std::chrono::steady_clock::time_point m_startTime =
@@ -48,17 +47,17 @@ public:
   void onScaleChanged();
   bool m_glSetup = false;
   void setPlayPause(bool play);
-  u32 m_wallpaperID;
+  u32 m_wallpaperID = 0;
 
 private:
-  wl_surface *m_waylandSurface;
+  wl_surface *m_waylandSurface = nullptr;
   Daemon &m_daemon;
-  zwlr_layer_surface_v1 *m_layerSurface;
-  wp_fractional_scale_v1 *m_fractionalScale;
-  wp_viewport *m_viewport;
-  wl_output *m_waylandOutput;
+  zwlr_layer_surface_v1 *m_layerSurface = nullptr;
+  wp_fractional_scale_v1 *m_fractionalScale = nullptr;
+  wp_viewport *m_viewport =  nullptr;
+  wl_output *m_waylandOutput = nullptr;
   u32 m_waylandName;
-  wl_egl_window *m_eglWindow = nullptr;
+  wl_egl_window *m_eglWindow =  nullptr;
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
@@ -68,15 +67,12 @@ private:
   void cudaNV12GLUpload(AVFrame *frame);
   void stageNV12Buffers(u32 width, u32 height);
 
-  // software data for cuda and generic nv12 frames
-  std::vector<uint8_t> m_hostY;
-  std::vector<uint8_t> m_hostUV;
 
   // GL STATE
-  GLuint m_textures[2]; //current display texture
-  GLuint m_toTextures[2]; // textures we are transitioning to
-  GLuint m_fromTextures[2]; //textures we are tranisition from
-  EGLImage m_eglImages[2]; //this is used for VAAPI ONLY
+  GLuint m_textures[2]{}; //current display texture
+  GLuint m_toTextures[2]{}; // textures we are transitioning to
+  GLuint m_fromTextures[2]{}; //textures we are tranisition from
+  EGLImage m_eglImages[2]{}; //this is used for VAAPI ONLY
   u32 m_VAO;
   GLuint m_glShaderProgram;
   void render();
@@ -91,6 +87,9 @@ private:
   bool m_renderIntoTempTexture = false;
   bool useTransitions = true;
   std::unique_ptr<TransitionState> m_transitionState = nullptr;
+  // software data for cuda and generic nv12 frames
+  std::vector<uint8_t> m_hostY;
+  std::vector<uint8_t> m_hostUV;
 };
 
 struct FrameCallbackData {

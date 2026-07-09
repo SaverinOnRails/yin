@@ -127,7 +127,6 @@ void Monitor::setName(const char *name) { m_name = name; }
 zwlr_layer_surface_v1 *Monitor::getLayerSurface() { return m_layerSurface; }
 
 void Monitor::createLayerSurface() {
-  std::cout << "creating layer surface" <<  std::endl;
   m_waylandSurface = wl_compositor_create_surface(m_daemon.getCompositor());
   assert(m_waylandSurface);
   auto input_region = wl_compositor_create_region(m_daemon.getCompositor());
@@ -264,9 +263,9 @@ void Monitor::render() {
     for (int i = 0; i < 2; ++i) {
       int pw = i ? w / 2 : w;
       int ph = i ? h / 2 : h;
-      // m_daemon.glCopyImageSubData(m_textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
-      //                    m_fromTextures[i], GL_TEXTURE_2D, 0, 0, 0, 0, pw, ph,
-      //                    1);
+      m_daemon.glCopyImageSubData(m_textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
+                                  m_fromTextures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
+                                  pw, ph, 1);
     }
   }
   if (m_transitionState != nullptr) {
@@ -681,6 +680,7 @@ void Monitor::setupGl() {
   // texture
   glGenTextures(2, m_textures);
   glGenTextures(2, m_toTextures);
+  glGenTextures(2, m_fromTextures);
   for (int i = 0; i < 2; ++i) {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -694,11 +694,11 @@ void Monitor::setupGl() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    // glBindTexture(GL_TEXTURE_2D, m_fromTextures[i]);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    // glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glBindTexture(GL_TEXTURE_2D, m_fromTextures[i]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   }
   glBindTexture(GL_TEXTURE_2D, 0);
 

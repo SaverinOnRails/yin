@@ -14,8 +14,8 @@
 #include <vector>
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
-
 class Monitor;
+
 class Daemon {
 public:
   Daemon(HardwareAccelerationBackend hab);
