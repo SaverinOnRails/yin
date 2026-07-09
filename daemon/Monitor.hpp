@@ -74,8 +74,8 @@ private:
 
   // GL STATE
   GLuint m_textures[2]; //current display texture
-  // GLuint m_toTextures[2]; // textures we are transitioning to
-  // GLuint m_fromTextures[2]; //textures we are tranisition from
+  GLuint m_toTextures[2]; // textures we are transitioning to
+  GLuint m_fromTextures[2]; //textures we are tranisition from
   EGLImage m_eglImages[2]; //this is used for VAAPI ONLY
   u32 m_VAO;
   GLuint m_glShaderProgram;
