@@ -3,3 +3,5 @@ release
 build-cuda
 .cache
 compile_commands.json
+result
+.direnv

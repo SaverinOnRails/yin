@@ -58,6 +58,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:yin_deps,cpp_args:yin_args, include_directories:yin_includes)
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:yin_deps,cpp_args:yin_args, include_directories:yin_includes, install: true)
 
- executable('yinctl' , ['client/main.cpp' , 'client/IPC_Client.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp']  )
+ executable('yinctl' , ['client/main.cpp' , 'client/IPC_Client.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp'], install: true)
