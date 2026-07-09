@@ -9,6 +9,7 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <GLES2/gl2.h>
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <string>
@@ -16,6 +17,13 @@
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
 class Daemon;
+
+struct TransitionState {
+  std::chrono::steady_clock::time_point m_startTime =
+      std::chrono::steady_clock::now();
+  std::chrono::milliseconds m_duration = std::chrono::seconds(3);
+};
+
 class Monitor {
 public:
   Monitor(wl_output *output, Daemon &daemon);
@@ -60,12 +68,13 @@ private:
   void cudaNV12GLUpload(AVFrame *frame);
   void stageNV12Buffers(u32 width, u32 height);
 
-  // software data for cuda and eventually generic nv12 stuff
+  // software data for cuda and generic nv12 frames
   std::vector<uint8_t> m_hostY;
   std::vector<uint8_t> m_hostUV;
 
-   // GL STATE
+  // GL STATE
   GLuint m_textures[2];
+  GLuint m_tempTextures[2]; // for transition
   EGLImage m_eglImages[2];
   u32 m_VAO;
   GLuint m_glShaderProgram;
@@ -73,6 +82,13 @@ private:
   void renderVAAPI();
   void renderCUDACopy();
   void renderSoftwareNV12();
+  void continueTransition();
+
+  // Transition state
+  bool m_isFirstAnimationFrame = false;
+  bool m_hasPreviousFrame = false;
+  bool m_renderIntoTempTexture = false;
+  std::unique_ptr<TransitionState> m_transitionState = nullptr;
 };
 
 struct FrameCallbackData {

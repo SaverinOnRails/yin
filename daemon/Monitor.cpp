@@ -250,6 +250,19 @@ void Monitor::render() {
     }
   }
 
+  bool startTransition = false;
+  // can we kick off a transition here
+  if (m_isFirstAnimationFrame && m_hasPreviousFrame) {
+    startTransition = true;
+    m_renderIntoTempTexture = true;
+    std::cout << "can kickof transition here" << std::endl;
+  }
+  if(m_transitionState != nullptr) {
+    continueTransition();
+    return;
+  }
+  
+  m_isFirstAnimationFrame = false;
   if (!m_wallpaper->m_isSingleFrame && !m_wallpaper->decodeNextFrame())
     return;
   if (m_wallpaper->m_frame->format == AV_PIX_FMT_VAAPI) {
@@ -261,6 +274,17 @@ void Monitor::render() {
   } else if (m_wallpaper->m_frame->format == AV_PIX_FMT_NV12) {
     renderSoftwareNV12();
   }
+
+  m_hasPreviousFrame = true;
+  if (startTransition) {
+    startTransition = false;
+    m_renderIntoTempTexture = false;
+    m_transitionState = std::make_unique<TransitionState>();
+  }
+}
+
+void Monitor::continueTransition() {
+  
 }
 
 void Monitor::stageNV12Buffers(u32 width, u32 height) {
@@ -458,7 +482,9 @@ void Monitor::renderVAAPI() {
                                  : "luma eglCreateImageKHR");
     }
     glActiveTexture(GL_TEXTURE0 + i);
-    glBindTexture(GL_TEXTURE_2D, m_textures[i]);
+    glBindTexture(GL_TEXTURE_2D, m_renderIntoTempTexture == true
+                                     ? m_tempTextures[i]
+                                     : m_textures[i]);
     while (glGetError()) {
     }
     m_daemon.glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, m_eglImages[i]);
@@ -470,14 +496,16 @@ void Monitor::renderVAAPI() {
   for (int i = 0; i < (int)prime.num_objects; ++i) {
     close(prime.objects[i].fd);
   }
-  // draw
-  glClear(GL_COLOR_BUFFER_BIT);
-  m_daemon.glBindVertexArray(m_VAO);
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  if (!m_renderIntoTempTexture) {
+    // draw
+    glClear(GL_COLOR_BUFFER_BIT);
+    m_daemon.glBindVertexArray(m_VAO);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
-  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
-    std::cout << eglGetError() << std::endl;
-    throw std::runtime_error("eglSwapBuffers failed");
+    if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+      std::cout << eglGetError() << std::endl;
+      throw std::runtime_error("eglSwapBuffers failed");
+    }
   }
 }
 
@@ -491,6 +519,7 @@ std::filesystem::path Monitor::historyFile() {
 WallpaperBindError Monitor::setWallpaper(std::string img_path) {
   m_wallpaper = std::make_unique<Wallpaper>();
   m_wallpaperPlaying = true;
+  m_isFirstAnimationFrame = true;
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay,
                                  m_daemon.m_hardwareAccelerationBackend);
   if (error == Success) {
@@ -688,6 +717,12 @@ void Monitor::setupGl() {
   glGenTextures(2, m_textures);
   for (int i = 0; i < 2; ++i) {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    glBindTexture(GL_TEXTURE_2D, m_tempTextures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
