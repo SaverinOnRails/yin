@@ -1,5 +1,7 @@
 #include "daemon/Wallpaper.hpp"
 #include <chrono>
+#include <filesystem>
+#include <iostream>
 #include <libavutil/buffer.h>
 #include <libavutil/frame.h>
 #include <libavutil/hwcontext.h>
@@ -31,6 +33,7 @@ WallpaperBindError Wallpaper::bind(std::string_view path, VADisplay va_display,
     HWDEC_PIXEL_FORMAT = AV_PIX_FMT_CUDA;
   } else {
   }
+
   if (avformat_open_input(&m_formatContext, path.data(), nullptr, nullptr) < 0)
     return BadVideo;
 
@@ -40,8 +43,10 @@ WallpaperBindError Wallpaper::bind(std::string_view path, VADisplay va_display,
   m_videoStream = av_find_best_stream(m_formatContext, AVMEDIA_TYPE_VIDEO, -1,
                                       -1, &m_codec, 0);
 
-  // check if this is a static image that won't be decoded on GPU
-
+  // It's possible the video codec can't be hardware decoded by the driver,
+  // that's probably unlikely for most videos so i'm gonna ignore that for now.
+  // But images and gifs should be software decoded. Rough check
+  auto ext = std::filesystem::path(path).extension();
   if (m_videoStream < 0)
     return BadVideo;
 
@@ -62,8 +67,10 @@ WallpaperBindError Wallpaper::bind(std::string_view path, VADisplay va_display,
   int64_t frameCount = m_formatContext->streams[m_videoStream]->nb_frames;
 
   // check if is static image that won't be decoded on GPU
-  if (frameCount == 1 || frameCount == 0) {
+  if ((frameCount == 1 || frameCount == 0) &&
+      (ext != ".mp4" && ext != ".mkv")) {
     m_isSingleFrame = true;
+    return decodeSingleFrameNV12();
   }
 
   // Allocate hardware device context
@@ -161,6 +168,70 @@ bool Wallpaper::decodeNextFrame() {
     }
     // loop back to receive_frame
   }
+}
+
+WallpaperBindError Wallpaper::decodeSingleFrameNV12() {
+  if (avcodec_open2(m_codecContext, m_codec, nullptr) < 0)
+    return BadVideo;
+
+  m_packet = av_packet_alloc();
+  if (!m_packet)
+    return BadVideo;
+
+  AVFrame *decoded = av_frame_alloc();
+  if (!decoded)
+    return BadVideo;
+
+  bool gotFrame = false;
+  while (av_read_frame(m_formatContext, m_packet) >= 0) {
+    if (m_packet->stream_index == m_videoStream) {
+      if (avcodec_send_packet(m_codecContext, m_packet) == 0 &&
+          avcodec_receive_frame(m_codecContext, decoded) == 0) {
+        gotFrame = true;
+        av_packet_unref(m_packet);
+        break;
+      }
+    }
+    av_packet_unref(m_packet);
+  }
+
+  if (!gotFrame) {
+    av_frame_free(&decoded);
+    return BadVideo;
+  }
+
+  if (decoded->format == AV_PIX_FMT_NV12) {
+    m_frame = decoded; // already NV12, nothing to do
+  } else {
+    AVFrame *nv12 = av_frame_alloc();
+    nv12->format = AV_PIX_FMT_NV12;
+    nv12->width = decoded->width;
+    nv12->height = decoded->height;
+    if (av_frame_get_buffer(nv12, 32) < 0) {
+      av_frame_free(&decoded);
+      av_frame_free(&nv12);
+      return BadVideo;
+    }
+
+    SwsContext *sws =
+        sws_getContext(decoded->width, decoded->height,
+                       static_cast<AVPixelFormat>(decoded->format),
+                       decoded->width, decoded->height, AV_PIX_FMT_NV12,
+                       SWS_BILINEAR, nullptr, nullptr, nullptr);
+    if (!sws) {
+      av_frame_free(&decoded);
+      av_frame_free(&nv12);
+      return BadVideo;
+    }
+
+    sws_scale(sws, decoded->data, decoded->linesize, 0, decoded->height,
+              nv12->data, nv12->linesize);
+    sws_freeContext(sws);
+    av_frame_free(&decoded);
+    m_frame = nv12;
+  }
+
+  return Success;
 }
 
 Wallpaper::~Wallpaper() {

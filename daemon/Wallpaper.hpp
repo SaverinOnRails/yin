@@ -11,6 +11,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/hwcontext.h>
+#include <libswscale/swscale.h>
 }
 #include <string_view>
 
@@ -33,18 +34,18 @@ public:
   void makeCudaContextCurrent();
 #endif
 
-public:
-  WallpaperBindError bind(std::string_view img_path, VADisplay va_display , HardwareAccelerationBackend backend );
+  WallpaperBindError bind(std::string_view img_path, VADisplay va_display,
+                          HardwareAccelerationBackend backend);
 
   AVFormatContext *m_formatContext = nullptr;
   int m_videoStream = -1;
   const AVCodec *m_codec = nullptr;
   AVBufferRef *m_hwDeviceContext = nullptr;
-  AVHWDeviceType m_hwType = AV_HWDEVICE_TYPE_NONE;
   AVPacket *m_packet = nullptr;
   AVFrame *m_frame = nullptr;
+  WallpaperBindError decodeSingleFrameNV12();
 
-  #ifdef ENABLE_CUDA
+#ifdef ENABLE_CUDA
   CUcontext m_cudaContext = nullptr;
-  #endif
+#endif
 };

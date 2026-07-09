@@ -9,12 +9,13 @@ gl=dependency('gl')
 avcodec = dependency('libavcodec')
 avutil = dependency('libavutil')
 wayland_scanner = dependency('wayland-scanner', version: '>=1.14.91', native: true)
+sw_scale = dependency('libswscale')
 wayland_protos = dependency('wayland-protocols', version: '>=1.31')
 wayland_scanner_prog = find_program(wayland_scanner.get_variable('wayland_scanner'), native: true)
 
 cuda_enabled = get_option('enable_cuda')
 yin_args = []
-yin_deps = [wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,va_wayland]
+yin_deps = [wayland_client_dep , wl_egl, egl, gl, avcodec,avformat,avutil,sw_scale,va_wayland]
 yin_includes = []
 cpp = meson.get_compiler('cpp')
 

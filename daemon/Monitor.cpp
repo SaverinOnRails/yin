@@ -249,7 +249,8 @@ void Monitor::render() {
       m_eglImages[i] = EGL_NO_IMAGE;
     }
   }
-  if (!m_wallpaper->decodeNextFrame())
+
+  if (!m_wallpaper->m_isSingleFrame && !m_wallpaper->decodeNextFrame())
     return;
   if (m_wallpaper->m_frame->format == AV_PIX_FMT_VAAPI) {
     renderVAAPI();
@@ -257,8 +258,8 @@ void Monitor::render() {
 #ifdef ENABLE_CUDA
     renderCUDACopy();
 #endif
-  } else {
-    // maybe software here
+  } else if (m_wallpaper->m_frame->format == AV_PIX_FMT_NV12) {
+    renderSoftwareNV12();
   }
 }
 
@@ -274,6 +275,45 @@ void Monitor::stageNV12Buffers(u32 width, u32 height) {
                GL_UNSIGNED_BYTE, nullptr);
 
   glBindTexture(GL_TEXTURE_2D, 0);
+}
+
+void Monitor::renderSoftwareNV12() {
+  auto *frame = m_wallpaper->m_frame;
+  int width = frame->width;
+  int height = frame->height;
+
+  if (m_hostY.size() != static_cast<size_t>(width) * height) {
+    stageNV12Buffers(width, height);
+  }
+
+  glUseProgram(m_glShaderProgram);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
+              1.0f);
+
+  m_daemon.glBindVertexArray(m_VAO);
+  // Y plane
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[0]);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED,
+                  GL_UNSIGNED_BYTE, frame->data[0]);
+
+  // UV plane
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[1] / 2);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width / 2, height / 2, GL_RG,
+                  GL_UNSIGNED_BYTE, frame->data[1]);
+
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
+    throw std::runtime_error("eglSwapBuffers failed");
+  }
 }
 
 #ifdef ENABLE_CUDA

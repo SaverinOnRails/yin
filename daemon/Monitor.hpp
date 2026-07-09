@@ -72,6 +72,7 @@ private:
   void render();
   void renderVAAPI();
   void renderCUDACopy();
+  void renderSoftwareNV12();
 };
 
 struct FrameCallbackData {
