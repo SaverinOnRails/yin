@@ -1,4 +1,5 @@
-project('Yin','cpp' ,'c')
+project('Yin','cpp' ,'c',
+  default_options : ['cpp_std=c++23'])
 wayland_client_dep = dependency('wayland-client')
 avformat = dependency('libavformat')
 wl_egl=dependency('wayland-egl')

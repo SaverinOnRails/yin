@@ -20,6 +20,5 @@ uniform float progress;
       crossfade
     );
   }
-  void main() {
-    oColor = transition(vTexCoord);
-  }
+
+  @MAIN

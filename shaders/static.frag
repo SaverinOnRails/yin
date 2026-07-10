@@ -49,6 +49,5 @@ vec4 transition(vec2 uv) {
 
   return color;
 }
-void main() {
-  oColor = transition(vTexCoord);
-}
+
+@MAIN

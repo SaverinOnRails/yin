@@ -26,7 +26,4 @@ vec4 transition(vec2 uv) {
   in_rect = rectIn == 1 ? 1.0 - in_rect : in_rect;
   return mix(getFromColor(uv), getToColor(uv), in_rect);
 }
-
-void main() {
-  oColor = transition(vTexCoord);
-}
+@MAIN

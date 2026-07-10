@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
@@ -77,9 +78,7 @@ private:
 
   // Shader programs
   GLuint m_glShaderProgram{};
-  GLuint m_glBoxTransitionShaderProgram{};
-  GLuint m_glStaticTransitionShaderProgram{};
-  GLuint m_glZoomTransitionShaderProgram{};
+  std::unordered_map<std::string, GLuint> m_transitionShaderPrograms{};
   void render();
   void renderVAAPI();
   void renderCUDACopy();

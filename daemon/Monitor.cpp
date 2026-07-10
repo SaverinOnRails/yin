@@ -1,8 +1,8 @@
 // MONITOR AND RENDERING
 #include "daemon/Monitor.hpp"
-#include "shaders_generated.hpp"
 #include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
+#include "shaders_generated.hpp"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
 #include <EGL/egl.h>
 #include <GL/gl.h>
@@ -604,12 +604,8 @@ Monitor::setWallpaper(std::string img_path,
   if (transition.has_value()) {
     auto trans = *transition;
     m_useTransitions = true;
-    if (trans == "box") {
-      m_requiredTransitionShaderProgram = m_glBoxTransitionShaderProgram;
-    } else if (trans == "static") {
-      m_requiredTransitionShaderProgram = m_glStaticTransitionShaderProgram;
-    } else if (trans == "zoom") {
-      m_requiredTransitionShaderProgram = m_glZoomTransitionShaderProgram;
+    if (m_transitionShaderPrograms.contains(trans)) {
+      m_requiredTransitionShaderProgram = m_transitionShaderPrograms[trans];
     } else {
       // just ignore
       m_useTransitions = false;
@@ -789,72 +785,28 @@ void Monitor::setupGl() {
 // TODO compiling transition shaders for every monitor is probably very
 // inefficient
 void Monitor::compileTransitionShaders(u32 vertexShader) {
-  // BOX TRANSITION FRAGMENT SHADER
-  u32 boxTransitionfragmentShader;
-  boxTransitionfragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(boxTransitionfragmentShader, 1,
-                 &boxTransitionFragmentShaderSource, NULL);
-  glCompileShader(boxTransitionfragmentShader);
-  {
-    GLint success;
-    char infoLog[512];
-
-    glGetShaderiv(boxTransitionfragmentShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(boxTransitionfragmentShader, 512, nullptr, infoLog);
-      std::cout << infoLog << std::endl;
+  for (const auto &[key, value] : transitionSourceMap) {
+    u32 shader;
+    shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(shader, 1, &value, NULL);
+    glCompileShader(shader);
+    {
+      GLint success;
+      char infoLog[512];
+      glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+      if (!success) {
+        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+        std::cout << "Problem compiling shader " << key << std::endl;
+        std::cout << infoLog << std::endl;
+      }
     }
+    auto shaderProgram = glCreateProgram();
+    glAttachShader(shaderProgram, vertexShader);
+    glAttachShader(shaderProgram, shader);
+    glLinkProgram(shaderProgram);
+    m_transitionShaderPrograms[key] = shaderProgram;
+    glDeleteShader(shader);
   }
-  m_glBoxTransitionShaderProgram = glCreateProgram();
-  glAttachShader(m_glBoxTransitionShaderProgram, vertexShader);
-  glAttachShader(m_glBoxTransitionShaderProgram, boxTransitionfragmentShader);
-  glLinkProgram(m_glBoxTransitionShaderProgram);
-  glDeleteShader(boxTransitionfragmentShader);
-
-  // BOX TRANSITION FRAGMENT SHADER
-  u32 staticTransitionShader;
-  staticTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(staticTransitionShader, 1,
-                 &staticTransitionFragmentShaderSource, NULL);
-  glCompileShader(staticTransitionShader);
-  {
-    GLint success;
-    char infoLog[512];
-
-    glGetShaderiv(staticTransitionShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(staticTransitionShader, 512, nullptr, infoLog);
-      std::cout << infoLog << std::endl;
-    }
-  }
-  m_glStaticTransitionShaderProgram = glCreateProgram();
-  glAttachShader(m_glStaticTransitionShaderProgram, vertexShader);
-  glAttachShader(m_glStaticTransitionShaderProgram,
-                 staticTransitionShader);
-  glLinkProgram(m_glStaticTransitionShaderProgram);
-  glDeleteShader(staticTransitionShader);
-
-  // ZOOM IN OUT FRAGMENT SHADER
-  u32 zoomTransitionShader;
-  zoomTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(zoomTransitionShader, 1,
-                 &zoomTransitionFragmentShaderSource, NULL);
-  glCompileShader(zoomTransitionShader);
-  {
-    GLint success;
-    char infoLog[512];
-
-    glGetShaderiv(zoomTransitionShader, GL_COMPILE_STATUS, &success);
-    if (!success) {
-      glGetShaderInfoLog(zoomTransitionShader, 512, nullptr, infoLog);
-      std::cout << infoLog << std::endl;
-    }
-  }
-  m_glZoomTransitionShaderProgram = glCreateProgram();
-  glAttachShader(m_glZoomTransitionShaderProgram, vertexShader);
-  glAttachShader(m_glZoomTransitionShaderProgram, zoomTransitionShader);
-  glLinkProgram(m_glZoomTransitionShaderProgram);
-  glDeleteShader(zoomTransitionShader);
 }
 
 void Monitor::setPlayPause(bool play) {
