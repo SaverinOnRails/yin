@@ -255,25 +255,15 @@ void Monitor::render() {
 
   bool startTransition = false;
 
-  // kickoff transition if :
-  // This is the very first frame of the video being rendered
+  // Kickoff transition if :
+  // This is the very first frame of the video/image being rendered
   // There is a previous texture to transition from
   // Transitions are enabled
   // There is no active transition
-  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions && !m_transitionState) {
+  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions &&
+      !m_transitionState) {
     startTransition = true;
     m_renderIntoTempTexture = true;
-    std::cout << "can kickof transition here" << std::endl;
-    int w = m_wallpaper->m_codecContext->width;
-    int h = m_wallpaper->m_codecContext->height;
-    for (int i = 0; i < 2; ++i) {
-      int pw = i ? w / 2 : w;
-      int ph = i ? h / 2 : h;
-      // snapshot frame
-      m_daemon.glCopyImageSubData(m_textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
-                                  m_fromTextures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
-                                  pw, ph, 1);
-    }
   }
   if (m_transitionState != nullptr) {
     continueTransition();
@@ -302,12 +292,11 @@ void Monitor::render() {
 }
 
 void Monitor::continueTransition() {
-  std::cout << "transitioning" << std::endl;
   glUseProgram(m_glBoxTransitionShaderProgram);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_fromTextures[0]);
+  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, m_fromTextures[1]);
+  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
   glActiveTexture(GL_TEXTURE2);
   glBindTexture(GL_TEXTURE_2D, m_toTextures[0]);
   glActiveTexture(GL_TEXTURE3);
@@ -322,6 +311,8 @@ void Monitor::continueTransition() {
   glUniform1i(glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexC_to"),
               3);
 
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
+              1.0f);
   auto now = std::chrono::steady_clock::now();
   float progress =
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
@@ -332,7 +323,7 @@ void Monitor::continueTransition() {
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
   m_daemon.glBindVertexArray(m_VAO);
-  glDrawArrays(GL_TRIANGLES, 0, 6);
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
     std::cout << eglGetError() << std::endl;
     throw std::runtime_error("eglSwapBuffers failed");
@@ -350,6 +341,13 @@ void Monitor::stageNV12Buffers(u32 width, u32 height) {
   glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
                GL_UNSIGNED_BYTE, nullptr);
   glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
+               GL_UNSIGNED_BYTE, nullptr);
+
+  glBindTexture(GL_TEXTURE_2D, m_toTextures[0]);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
+               GL_UNSIGNED_BYTE, nullptr);
+  glBindTexture(GL_TEXTURE_2D, m_toTextures[1]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
                GL_UNSIGNED_BYTE, nullptr);
 
@@ -374,24 +372,28 @@ void Monitor::renderSoftwareNV12() {
   m_daemon.glBindVertexArray(m_VAO);
   // Y plane
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glBindTexture(GL_TEXTURE_2D,
+                m_renderIntoTempTexture ? m_toTextures[0] : m_textures[0]);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[0]);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED,
                   GL_UNSIGNED_BYTE, frame->data[0]);
 
   // UV plane
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glBindTexture(GL_TEXTURE_2D,
+                m_renderIntoTempTexture ? m_toTextures[1] : m_textures[1]);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[1] / 2);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width / 2, height / 2, GL_RG,
                   GL_UNSIGNED_BYTE, frame->data[1]);
 
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
-  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
-    std::cout << eglGetError() << std::endl;
-    throw std::runtime_error("eglSwapBuffers failed");
+  if (!m_renderIntoTempTexture) {
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+    if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+      std::cout << eglGetError() << std::endl;
+      throw std::runtime_error("eglSwapBuffers failed");
+    }
   }
 }
 
@@ -407,15 +409,22 @@ void Monitor::renderCUDACopy() {
   m_daemon.glBindVertexArray(m_VAO);
 
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D, m_textures[0]); // Y -> uTexY
+  glBindTexture(GL_TEXTURE_2D, m_renderIntoTempTexture
+                                   ? m_toTextures[0]
+                                   : m_textures[0]); // Y -> uTexY
   glActiveTexture(GL_TEXTURE1);
-  glBindTexture(GL_TEXTURE_2D, m_textures[1]); // UV -> uTexC
+  glBindTexture(GL_TEXTURE_2D, m_renderIntoTempTexture
+                                   ? m_toTextures[1]
+                                   : m_textures[1]); // UV -> uTexC
 
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  if (!m_renderIntoTempTexture) {
 
-  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
-    std::cout << eglGetError() << std::endl;
-    throw std::runtime_error("eglSwapBuffers failed");
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+
+    if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+      std::cout << eglGetError() << std::endl;
+      throw std::runtime_error("eglSwapBuffers failed");
+    }
   }
 }
 void Monitor::cudaNV12GLUpload(AVFrame *frame) {
@@ -472,11 +481,13 @@ void Monitor::cudaNV12GLUpload(AVFrame *frame) {
       throw std::runtime_error("CUDA memcopy of UV plane failed");
     }
   }
-  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+  glBindTexture(GL_TEXTURE_2D,
+                m_renderIntoTempTexture ? m_toTextures[0] : m_textures[0]);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, GL_RED,
                   GL_UNSIGNED_BYTE, m_hostY.data());
 
-  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+  glBindTexture(GL_TEXTURE_2D, m_renderIntoTempTexture == true ? m_toTextures[1]
+                                                               : m_textures[1]);
   glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width / 2, height / 2, GL_RG,
                   GL_UNSIGNED_BYTE, m_hostUV.data());
 
@@ -728,7 +739,6 @@ void Monitor::setupGl() {
   // texture
   glGenTextures(2, m_textures);
   glGenTextures(2, m_toTextures);
-  glGenTextures(2, m_fromTextures);
   for (int i = 0; i < 2; ++i) {
     glBindTexture(GL_TEXTURE_2D, m_textures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -737,12 +747,6 @@ void Monitor::setupGl() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     glBindTexture(GL_TEXTURE_2D, m_toTextures[i]);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-    glBindTexture(GL_TEXTURE_2D, m_fromTextures[i]);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
