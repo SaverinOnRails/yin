@@ -2,8 +2,8 @@
 
 
 ## Yin
-Yin is an efficient animated wallpaper daemon inspired by [swww](https://github.com/LGFae/swww).
-Yin is IPC controlled, hardware accelerated and can play pretty much anything that ffmpeg can. It is also extremely lightweight, depending only on wayland and ffmpeg.
+Yin is an efficient, very lightweight( < 200kb) animated wallpaper daemon inspired by [swww](https://github.com/LGFae/swww).
+Yin is IPC controlled, hardware accelerated and can play videos and images. It depends only on wayland and ffmpeg. Yin is still early in dev and VERY unstable.
 
 ## Dependencies
 - Wayland client and protocols
@@ -53,6 +53,8 @@ https://github.com/user-attachments/assets/552923ae-e535-4461-a34f-fb7d5c7c057a
 - Can play videos, gifs, and static images.
 - Multi monitor support
 - Runtime pause and play commands
+- GPU based transitions
+- Does not depend on any external video players like mpv, vlc or Qt media kit
 
 # Important
 There is currently no software rendering fallback for videos should hardware decoding fail. Which means if your video drivers are not properly configured you cannot use yin. You can setup your display drivers correctly for your distro.
