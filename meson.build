@@ -43,6 +43,19 @@ wayland_scanner_client = generator(
 	arguments: ['client-header', '@INPUT@', '@OUTPUT@'],
 )
 
+python = import('python').find_installation()
+generated_shaders = custom_target(
+    'generate_shaders',
+    output: 'shaders_generated.hpp',
+    command: [
+        python,
+        files('scripts/gen_shaders.py'),
+        '@OUTPUT@',
+        files('shaders/main.vert'),
+        files('shaders/main.frag'),
+        meson.current_source_dir() / 'shaders'
+    ],
+)
 
 wl_protocol_dir = wayland_protos.get_variable('pkgdatadir')
 client_protocols = [
@@ -58,6 +71,6 @@ foreach filename : client_protocols
 	protos_src += wayland_scanner_client.process(filename)
 endforeach
 
-executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src],dependencies:yin_deps,cpp_args:yin_args, include_directories:yin_includes)
+executable('yin',['daemon/Monitor.cpp','daemon/main.cpp' ,  'daemon/Daemon.cpp' , 'daemon/Buffer.cpp', 'daemon/IPC_Server.cpp', 'shared/Binary.cpp' ,'shared/Message.cpp' ,'daemon/Wallpaper.cpp' , protos_src, generated_shaders],dependencies:yin_deps,cpp_args:yin_args, include_directories:yin_includes)
 
  executable('yinctl' , ['client/main.cpp' , 'client/IPC_Client.cpp' , 'shared/Binary.cpp', 'shared/Message.cpp' , 'client/Ffmpeg.cpp']  )

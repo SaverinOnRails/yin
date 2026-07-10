@@ -78,8 +78,8 @@ private:
   // Shader programs
   GLuint m_glShaderProgram{};
   GLuint m_glBoxTransitionShaderProgram{};
-  GLuint m_glLostSignalTransitionShaderProgram{};
-  GLuint m_glzoomInOutTransitionShaderProgram{};
+  GLuint m_glStaticTransitionShaderProgram{};
+  GLuint m_glZoomTransitionShaderProgram{};
   void render();
   void renderVAAPI();
   void renderCUDACopy();

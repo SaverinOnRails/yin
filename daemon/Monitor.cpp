@@ -1,6 +1,6 @@
 // MONITOR AND RENDERING
 #include "daemon/Monitor.hpp"
-#include "Shaders.hpp"
+#include "shaders_generated.hpp"
 #include "daemon/Wallpaper.hpp"
 #include "fractional-scale-v1-client-protocol.h"
 #include "wlr-layer-shell-unstable-v1-client-protocol.h"
@@ -607,9 +607,9 @@ Monitor::setWallpaper(std::string img_path,
     if (trans == "box") {
       m_requiredTransitionShaderProgram = m_glBoxTransitionShaderProgram;
     } else if (trans == "static") {
-      m_requiredTransitionShaderProgram = m_glLostSignalTransitionShaderProgram;
+      m_requiredTransitionShaderProgram = m_glStaticTransitionShaderProgram;
     } else if (trans == "zoom") {
-      m_requiredTransitionShaderProgram = m_glzoomInOutTransitionShaderProgram;
+      m_requiredTransitionShaderProgram = m_glZoomTransitionShaderProgram;
     } else {
       // just ignore
       m_useTransitions = false;
@@ -812,49 +812,49 @@ void Monitor::compileTransitionShaders(u32 vertexShader) {
   glDeleteShader(boxTransitionfragmentShader);
 
   // BOX TRANSITION FRAGMENT SHADER
-  u32 lostSignalTransitionShader;
-  lostSignalTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(lostSignalTransitionShader, 1,
-                 &lostSignalTransitionFragmentShaderSource, NULL);
-  glCompileShader(lostSignalTransitionShader);
+  u32 staticTransitionShader;
+  staticTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(staticTransitionShader, 1,
+                 &staticTransitionFragmentShaderSource, NULL);
+  glCompileShader(staticTransitionShader);
   {
     GLint success;
     char infoLog[512];
 
-    glGetShaderiv(lostSignalTransitionShader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(staticTransitionShader, GL_COMPILE_STATUS, &success);
     if (!success) {
-      glGetShaderInfoLog(lostSignalTransitionShader, 512, nullptr, infoLog);
+      glGetShaderInfoLog(staticTransitionShader, 512, nullptr, infoLog);
       std::cout << infoLog << std::endl;
     }
   }
-  m_glLostSignalTransitionShaderProgram = glCreateProgram();
-  glAttachShader(m_glLostSignalTransitionShaderProgram, vertexShader);
-  glAttachShader(m_glLostSignalTransitionShaderProgram,
-                 lostSignalTransitionShader);
-  glLinkProgram(m_glLostSignalTransitionShaderProgram);
-  glDeleteShader(lostSignalTransitionShader);
+  m_glStaticTransitionShaderProgram = glCreateProgram();
+  glAttachShader(m_glStaticTransitionShaderProgram, vertexShader);
+  glAttachShader(m_glStaticTransitionShaderProgram,
+                 staticTransitionShader);
+  glLinkProgram(m_glStaticTransitionShaderProgram);
+  glDeleteShader(staticTransitionShader);
 
   // ZOOM IN OUT FRAGMENT SHADER
-  u32 zoomInOutTransitionShader;
-  zoomInOutTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
-  glShaderSource(zoomInOutTransitionShader, 1,
-                 &zoomInOutTransitionFragmentShaderSource, NULL);
-  glCompileShader(zoomInOutTransitionShader);
+  u32 zoomTransitionShader;
+  zoomTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(zoomTransitionShader, 1,
+                 &zoomTransitionFragmentShaderSource, NULL);
+  glCompileShader(zoomTransitionShader);
   {
     GLint success;
     char infoLog[512];
 
-    glGetShaderiv(zoomInOutTransitionShader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(zoomTransitionShader, GL_COMPILE_STATUS, &success);
     if (!success) {
-      glGetShaderInfoLog(zoomInOutTransitionShader, 512, nullptr, infoLog);
+      glGetShaderInfoLog(zoomTransitionShader, 512, nullptr, infoLog);
       std::cout << infoLog << std::endl;
     }
   }
-  m_glzoomInOutTransitionShaderProgram = glCreateProgram();
-  glAttachShader(m_glzoomInOutTransitionShaderProgram, vertexShader);
-  glAttachShader(m_glzoomInOutTransitionShaderProgram, zoomInOutTransitionShader);
-  glLinkProgram(m_glzoomInOutTransitionShaderProgram);
-  glDeleteShader(zoomInOutTransitionShader);
+  m_glZoomTransitionShaderProgram = glCreateProgram();
+  glAttachShader(m_glZoomTransitionShaderProgram, vertexShader);
+  glAttachShader(m_glZoomTransitionShaderProgram, zoomTransitionShader);
+  glLinkProgram(m_glZoomTransitionShaderProgram);
+  glDeleteShader(zoomTransitionShader);
 }
 
 void Monitor::setPlayPause(bool play) {
