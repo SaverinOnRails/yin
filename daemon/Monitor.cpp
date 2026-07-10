@@ -292,7 +292,8 @@ void Monitor::render() {
 }
 
 void Monitor::continueTransition() {
-  glUseProgram(m_glBoxTransitionShaderProgram);
+  GLuint transition = m_glLostSignalTransitionShaderProgram;
+  glUseProgram(transition);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, m_textures[0]);
   glActiveTexture(GL_TEXTURE1);
@@ -302,14 +303,10 @@ void Monitor::continueTransition() {
   glActiveTexture(GL_TEXTURE3);
   glBindTexture(GL_TEXTURE_2D, m_toTextures[1]);
 
-  glUniform1i(
-      glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexY_from"), 0);
-  glUniform1i(
-      glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexC_from"), 1);
-  glUniform1i(glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexY_to"),
-              2);
-  glUniform1i(glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexC_to"),
-              3);
+  glUniform1i(glGetUniformLocation(transition, "uTexY_from"), 0);
+  glUniform1i(glGetUniformLocation(transition, "uTexC_from"), 1);
+  glUniform1i(glGetUniformLocation(transition, "uTexY_to"), 2);
+  glUniform1i(glGetUniformLocation(transition, "uTexC_to"), 3);
 
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
               1.0f);
@@ -317,7 +314,7 @@ void Monitor::continueTransition() {
   float progress =
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
       m_transitionState->m_duration;
-  glUniform1f(glGetUniformLocation(m_glBoxTransitionShaderProgram, "progress"),
+  glUniform1f(glGetUniformLocation(transition, "progress"),
               std::clamp(progress, 0.0f, 1.0f));
 
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
@@ -626,8 +623,9 @@ void Monitor::onFrame(u32 scheduledID) {
     m_nextVideoFrame += m_wallpaper->m_frameDuration;
     render();
   }
-  // don't render again if we have a single image
-  if (m_wallpaper->m_isSingleFrame || m_wallpaperPlaying == false)
+  // don't render again if we have a single image unless we are in a transition
+  if ((m_wallpaper->m_isSingleFrame && m_transitionState == nullptr) ||
+      m_wallpaperPlaying == false)
     return;
   nextFrame();
 }
@@ -779,6 +777,29 @@ void Monitor::compileTransitionShaders(u32 vertexShader) {
   glAttachShader(m_glBoxTransitionShaderProgram, boxTransitionfragmentShader);
   glLinkProgram(m_glBoxTransitionShaderProgram);
   glDeleteShader(boxTransitionfragmentShader);
+
+  // BOX TRANSITION FRAGMENT SHADER
+  u32 lostSignalTransitionShader;
+  lostSignalTransitionShader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(lostSignalTransitionShader, 1,
+                 &lostSignalTransitionFragmentShaderSource, NULL);
+  glCompileShader(lostSignalTransitionShader);
+  {
+    GLint success;
+    char infoLog[512];
+
+    glGetShaderiv(lostSignalTransitionShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(lostSignalTransitionShader, 512, nullptr, infoLog);
+      std::cout << infoLog << std::endl;
+    }
+  }
+  m_glLostSignalTransitionShaderProgram = glCreateProgram();
+  glAttachShader(m_glLostSignalTransitionShaderProgram, vertexShader);
+  glAttachShader(m_glLostSignalTransitionShaderProgram,
+                 lostSignalTransitionShader);
+  glLinkProgram(m_glLostSignalTransitionShaderProgram);
+  glDeleteShader(lostSignalTransitionShader);
 }
 
 void Monitor::setPlayPause(bool play) {

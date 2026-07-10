@@ -75,6 +75,7 @@ private:
   u32 m_VAO;
   GLuint m_glShaderProgram{};
   GLuint m_glBoxTransitionShaderProgram{};
+  GLuint m_glLostSignalTransitionShaderProgram{};
   void render();
   void renderVAAPI();
   void renderCUDACopy();
