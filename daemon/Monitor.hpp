@@ -80,7 +80,7 @@ private:
   void renderVAAPI();
   void renderCUDACopy();
   void renderSoftwareNV12();
-  void continueTransition();
+  void resumeTransition();
   void compileTransitionShaders(u32 vertexShader);
 
   // Transition state
@@ -93,6 +93,8 @@ private:
   // software data for cudac copy and generic nv12 frames
   std::vector<uint8_t> m_hostY;
   std::vector<uint8_t> m_hostUV;
+  float m_lastTextCoordScaleX = 1.0;
+  float m_lastTextCoordScaleY = 1.0;
 };
 
 struct FrameCallbackData {

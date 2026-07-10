@@ -266,7 +266,7 @@ void Monitor::render() {
     m_renderIntoTempTexture = true;
   }
   if (m_transitionState != nullptr) {
-    continueTransition();
+    resumeTransition();
     return;
   }
 
@@ -291,7 +291,7 @@ void Monitor::render() {
   }
 }
 
-void Monitor::continueTransition() {
+void Monitor::resumeTransition() {
   GLuint transition = m_glLostSignalTransitionShaderProgram;
   glUseProgram(transition);
   glActiveTexture(GL_TEXTURE0);
@@ -308,8 +308,8 @@ void Monitor::continueTransition() {
   glUniform1i(glGetUniformLocation(transition, "uTexY_to"), 2);
   glUniform1i(glGetUniformLocation(transition, "uTexC_to"), 3);
 
-  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
-              1.0f);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), m_lastTextCoordScaleX,
+              m_lastTextCoordScaleY);
   auto now = std::chrono::steady_clock::now();
   float progress =
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
@@ -327,6 +327,10 @@ void Monitor::continueTransition() {
   }
   if (progress >= 1.0f) {
     m_transitionState = nullptr;
+  }
+  //we have to do this or future transitions from a static image will be from a stale texture since static images will stop rendering after we nullify m_transitionState
+  if(m_wallpaper->m_isSingleFrame) {
+    render();
   }
 }
 
@@ -365,6 +369,8 @@ void Monitor::renderSoftwareNV12() {
   glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
               1.0f);
+  m_lastTextCoordScaleX = 1.0f;
+  m_lastTextCoordScaleY = 1.0f;
 
   m_daemon.glBindVertexArray(m_VAO);
   // Y plane
@@ -403,6 +409,8 @@ void Monitor::renderCUDACopy() {
   glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), 1.0f,
               1.0f);
+  m_lastTextCoordScaleX = 1.0;
+  m_lastTextCoordScaleY = 1.0;
   m_daemon.glBindVertexArray(m_VAO);
 
   glActiveTexture(GL_TEXTURE0);
@@ -515,6 +523,8 @@ void Monitor::renderVAAPI() {
   glUseProgram(m_glShaderProgram);
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
               texcoord_x1, texcoord_y1);
+  m_lastTextCoordScaleX = texcoord_x1;
+  m_lastTextCoordScaleY = texcoord_y1;
 
   for (int i = 0; i < 2; ++i) {
     static const uint32_t formats[2] = {DRM_FORMAT_R8, DRM_FORMAT_GR88};
