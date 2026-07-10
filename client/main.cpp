@@ -42,15 +42,14 @@ void process_args(int argc, char **argv) {
       args.play = true;
     } else if (argv[i] == std::string_view{"--restore"}) {
       args.restore = true;
-    } else if (argv[i] == std::string_view{"--help"} || argv[i] == std::string_view{"-h"}) {
+    } else if (argv[i] == std::string_view{"--help"} ||
+               argv[i] == std::string_view{"-h"}) {
       args.help = true;
-    }
-    else if(argv[i] == std::string_view{"--trans"}) {
+    } else if (argv[i] == std::string_view{"--trans"}) {
       if (i + 1 >= argc)
         throw std::runtime_error("Transition not specified");
-      args.transition = argv[i+1];
-    }
-    else if(argv[i] == std::string_view{"--list-trans"}) {
+      args.transition = argv[i + 1];
+    } else if (argv[i] == std::string_view{"--list-trans"}) {
       args.listTrans = true;
     }
   }
@@ -69,6 +68,8 @@ int main(int argc, char **argv) {
     RestoreWallpaper();
   } else if (args.play.has_value()) {
     PlayPauseWallpaper(*args.play);
+  } else if (args.listTrans) {
+    std::cout << "box , static , zoom" << std::endl;
   }
 }
 
@@ -81,7 +82,8 @@ void printHelp() {
             << "  --play              Resume animated wallpaper playback\n"
             << "  --pause             Pause animated wallpaper playback\n"
             << "  --restore           Restore previously cached wallpapers\n"
-            << " --trans <TRANSITION> Set the transition that will be used for this request"
+            << " --trans <TRANSITION> Set the transition that will be used for "
+               "this request"
             << " --list-trans         List all available transitions"
             << "  -h, --help          Show this help message\n\n"
             << "Examples:\n"
@@ -131,8 +133,9 @@ void setWallpaper() {
   if (!std::filesystem::exists(cachePath)) {
     cacheVideo(args.img_path.value(), cachePath, width, height);
   }
-  Message message =
-      SetWallpaperMessage{.monitor = args.monitor, .transition = args.transition, .imgPath = cachePath};
+  Message message = SetWallpaperMessage{.monitor = args.monitor,
+                                        .transition = args.transition,
+                                        .imgPath = cachePath};
   auto payload = SerializeMessage(message);
 
   // reset connection for fresh message
