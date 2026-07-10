@@ -1,4 +1,3 @@
-from aqt.props import TRANSITION
 from pathlib import Path
 import sys
 output = sys.argv[1]
