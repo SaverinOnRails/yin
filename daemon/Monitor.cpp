@@ -1,3 +1,4 @@
+// MONITOR AND RENDERING
 #include "daemon/Monitor.hpp"
 #include "Shaders.hpp"
 #include "daemon/Wallpaper.hpp"
@@ -6,6 +7,7 @@
 #include <EGL/egl.h>
 #include <GL/gl.h>
 #include <GLES2/gl2.h>
+#include <algorithm>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
@@ -253,8 +255,12 @@ void Monitor::render() {
 
   bool startTransition = false;
 
-  // kickoff transition if we can?
-  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions) {
+  // kickoff transition if :
+  // This is the very first frame of the video being rendered
+  // There is a previous texture to transition from
+  // Transitions are enabled
+  // There is no active transition
+  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions && !m_transitionState) {
     startTransition = true;
     m_renderIntoTempTexture = true;
     std::cout << "can kickof transition here" << std::endl;
@@ -263,6 +269,7 @@ void Monitor::render() {
     for (int i = 0; i < 2; ++i) {
       int pw = i ? w / 2 : w;
       int ph = i ? h / 2 : h;
+      // snapshot frame
       m_daemon.glCopyImageSubData(m_textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
                                   m_fromTextures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
                                   pw, ph, 1);
@@ -294,7 +301,46 @@ void Monitor::render() {
   }
 }
 
-void Monitor::continueTransition() {}
+void Monitor::continueTransition() {
+  std::cout << "transitioning" << std::endl;
+  glUseProgram(m_glBoxTransitionShaderProgram);
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_fromTextures[0]);
+  glActiveTexture(GL_TEXTURE1);
+  glBindTexture(GL_TEXTURE_2D, m_fromTextures[1]);
+  glActiveTexture(GL_TEXTURE2);
+  glBindTexture(GL_TEXTURE_2D, m_toTextures[0]);
+  glActiveTexture(GL_TEXTURE3);
+  glBindTexture(GL_TEXTURE_2D, m_toTextures[1]);
+
+  glUniform1i(
+      glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexY_from"), 0);
+  glUniform1i(
+      glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexC_from"), 1);
+  glUniform1i(glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexY_to"),
+              2);
+  glUniform1i(glGetUniformLocation(m_glBoxTransitionShaderProgram, "uTexC_to"),
+              3);
+
+  auto now = std::chrono::steady_clock::now();
+  float progress =
+      std::chrono::duration<float>(now - m_transitionState->m_startTime) /
+      m_transitionState->m_duration;
+  glUniform1f(glGetUniformLocation(m_glBoxTransitionShaderProgram, "progress"),
+              std::clamp(progress, 0.0f, 1.0f));
+
+  glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
+             static_cast<GLsizei>(m_bufferHeight));
+  m_daemon.glBindVertexArray(m_VAO);
+  glDrawArrays(GL_TRIANGLES, 0, 6);
+  if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
+    std::cout << eglGetError() << std::endl;
+    throw std::runtime_error("eglSwapBuffers failed");
+  }
+  if (progress >= 1.0f) {
+    m_transitionState = nullptr;
+  }
+}
 
 void Monitor::stageNV12Buffers(u32 width, u32 height) {
   m_hostY.resize(static_cast<size_t>(width) * height);
@@ -664,15 +710,17 @@ void Monitor::setupGl() {
   glAttachShader(m_glShaderProgram, fragmentShader);
   glLinkProgram(m_glShaderProgram);
 
-  glUseProgram(m_glShaderProgram);
-  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
-  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+  // TODO compiling transition shaders for every monitor is probably inefficient
+  compileTransitionShaders(vertexShader);
   glDeleteShader(vertexShader);
   glDeleteShader(fragmentShader);
 
+  glUseProgram(m_glShaderProgram);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
+  glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
+
   glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
   glEnableVertexAttribArray(0);
-
   glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float),
                         (void *)(3 * sizeof(float)));
   glEnableVertexAttribArray(1);
@@ -704,6 +752,31 @@ void Monitor::setupGl() {
 
   m_glSetup = true;
 }
+
+void Monitor::compileTransitionShaders(u32 vertexShader) {
+  // BOX TRANSITION FRAGMENT SHADER
+  u32 boxTransitionfragmentShader;
+  boxTransitionfragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+  glShaderSource(boxTransitionfragmentShader, 1,
+                 &boxTransitionFragmentShaderSource, NULL);
+  glCompileShader(boxTransitionfragmentShader);
+  {
+    GLint success;
+    char infoLog[512];
+
+    glGetShaderiv(boxTransitionfragmentShader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+      glGetShaderInfoLog(boxTransitionfragmentShader, 512, nullptr, infoLog);
+      std::cout << infoLog << std::endl;
+    }
+  }
+  m_glBoxTransitionShaderProgram = glCreateProgram();
+  glAttachShader(m_glBoxTransitionShaderProgram, vertexShader);
+  glAttachShader(m_glBoxTransitionShaderProgram, boxTransitionfragmentShader);
+  glLinkProgram(m_glBoxTransitionShaderProgram);
+  glDeleteShader(boxTransitionfragmentShader);
+}
+
 void Monitor::setPlayPause(bool play) {
   if (play && !m_wallpaperPlaying) {
     m_nextVideoFrame =

@@ -34,7 +34,7 @@ public:
   u32 m_bufferHeight, m_bufferWidth;
   i32 m_scale = 0;
   u32 m_fractScale = 0;
-  u32 configure_serial;
+  u32 configure_serial = 0;
   std::string m_name;
   void resizeEGL();
   void createAndAttachBuffer();
@@ -74,12 +74,14 @@ private:
   GLuint m_fromTextures[2]{}; //textures we are tranisition from
   EGLImage m_eglImages[2]{}; //this is used for VAAPI ONLY
   u32 m_VAO;
-  GLuint m_glShaderProgram;
+  GLuint m_glShaderProgram{};
+  GLuint m_glBoxTransitionShaderProgram{};
   void render();
   void renderVAAPI();
   void renderCUDACopy();
   void renderSoftwareNV12();
   void continueTransition();
+  void compileTransitionShaders(u32 vertexShader);
 
   // Transition state
   bool m_isFirstAnimationFrame = false;
@@ -87,7 +89,8 @@ private:
   bool m_renderIntoTempTexture = false;
   bool useTransitions = true;
   std::unique_ptr<TransitionState> m_transitionState = nullptr;
-  // software data for cuda and generic nv12 frames
+  
+  // software data for cudac copy and generic nv12 frames
   std::vector<uint8_t> m_hostY;
   std::vector<uint8_t> m_hostUV;
 };
