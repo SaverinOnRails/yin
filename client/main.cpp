@@ -1,6 +1,7 @@
 #include "shared/IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstdlib>
+#include "shaders_generated.hpp"
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -69,7 +70,7 @@ int main(int argc, char **argv) {
   } else if (args.play.has_value()) {
     PlayPauseWallpaper(*args.play);
   } else if (args.listTrans) {
-    std::cout << "box , static , zoom" << std::endl;
+    std::cout << availableTransitions << std::endl;
   }
 }
 

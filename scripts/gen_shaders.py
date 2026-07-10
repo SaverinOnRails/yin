@@ -57,13 +57,17 @@ with open(fragment_shader) as file:
     shaders += ")\";\n"
 
 #general transition fragment shaders
+transition_shader_names = []
 shaders_path = Path(shaders_dir)
 for p in shaders_path.iterdir():
     if(p.name == "main.vert" or p.name == "main.frag"):
         continue
     shaders += f"const char* {p.name.rstrip(".frag")}TransitionFragmentShaderSource = R\"(\n"
     shaders += p.read_text().replace("@YUV2RGB",yuv2rgb).replace("@UNIFORMS",uniforms).replace("@FUNCTIONS",functions)
+    transition_shader_names.append(p.name.rstrip(".frag"))
     shaders += ")\";\n"
 
+#generate names of available shaders at compile time
+shaders += f"const char * availableTransitions = \"{" ".join(transition_shader_names)}\";\n"
 with open(output,"w") as file:
     file.write(shaders)
