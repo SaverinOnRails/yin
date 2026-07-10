@@ -1,3 +1,4 @@
+// There is probably a neater way to store these shaders
 // https://gist.github.com/kajott/d1b29c613be30893c855621edd1f212e
 #define DECLARE_YUV2RGB_MATRIX_GLSL                                            \
   "const mat4 yuv2rgb = mat4(\n"                                               \
@@ -168,6 +169,53 @@ vec4 transition(vec2 uv) {
     color.rgb -= scan * strength;
 
     return color;
+}
+    void main() {
+        oColor = transition(vTexCoord);
+    }
+    )";
+const char *zoomInOutTransitionFragmentShaderSource = R"(
+       
+// Author: bread
+// License: MIT
+    #version 130
+in vec2 vTexCoord;
+uniform sampler2D uTexY_from;
+uniform sampler2D uTexC_from;
+uniform sampler2D uTexY_to;
+uniform sampler2D uTexC_to;
+uniform float progress;
+out vec4 oColor;)" DECLARE_YUV2RGB_MATRIX_GLSL
+                                                   R"(
+
+    vec4 getFromColor(vec2 uv) {
+        return yuv2rgb * vec4(
+            texture(uTexY_from, uv).x,
+            texture(uTexC_from, uv).xy,
+            1.0
+        );
+    }
+
+    vec4 getToColor(vec2 uv) {
+        return yuv2rgb * vec4(
+            texture(uTexY_to, uv).x,
+            texture(uTexC_to, uv).xy,
+            1.0
+        );
+    }
+vec2 zoom(vec2 uv, float amount) {
+  return 0.5 + ((uv - 0.5) * (1.0 - amount));
+}
+
+vec4 transition (vec2 uv) {
+  float zoomFrom = smoothstep(0.0, 1.0, progress * 2.0);
+  float zoomTo = smoothstep(0.0, 1.0, (1.0 - progress) * 2.0);
+  float crossfade = smoothstep(0.4, 0.6, progress);
+  return mix(
+    getFromColor(zoom(uv, zoomFrom)),
+    getToColor(zoom(uv, zoomTo)),
+    crossfade
+  );
 }
     void main() {
         oColor = transition(vTexCoord);

@@ -41,7 +41,8 @@ public:
   void createAndAttachBuffer();
   std::chrono::steady_clock::time_point m_nextVideoFrame;
   std::unique_ptr<Buffer> m_buffer;
-  WallpaperBindError setWallpaper(std::string img_path, std::optional<std::string> transition);
+  WallpaperBindError setWallpaper(std::string img_path,
+                                  std::optional<std::string> transition);
   WallpaperBindError restoreWallpaper();
   void setupGl();
   void onFrame(u32 scheduledID);
@@ -55,10 +56,10 @@ private:
   Daemon &m_daemon;
   zwlr_layer_surface_v1 *m_layerSurface = nullptr;
   wp_fractional_scale_v1 *m_fractionalScale = nullptr;
-  wp_viewport *m_viewport =  nullptr;
+  wp_viewport *m_viewport = nullptr;
   wl_output *m_waylandOutput = nullptr;
   u32 m_waylandName;
-  wl_egl_window *m_eglWindow =  nullptr;
+  wl_egl_window *m_eglWindow = nullptr;
   EGLSurface m_eglSurface = EGL_NO_SURFACE;
   std::unique_ptr<Wallpaper> m_wallpaper = nullptr;
   void nextFrame();
@@ -68,15 +69,17 @@ private:
   void cudaNV12GLUpload(AVFrame *frame);
   void stageNV12Buffers(u32 width, u32 height);
 
-
   // GL STATE
-  GLuint m_textures[2]{}; //current display texture
-  GLuint m_toTextures[2]{}; // textures we are transitioning to
-  EGLImage m_eglImages[2]{}; //this is used for VAAPI ONLY
+  GLuint m_textures[2]{};    // current display texture
+  GLuint m_toTextures[2]{};  // textures we are transitioning to
+  EGLImage m_eglImages[2]{}; // this is used for VAAPI ONLY
   u32 m_VAO;
+
+  // Shader programs
   GLuint m_glShaderProgram{};
   GLuint m_glBoxTransitionShaderProgram{};
   GLuint m_glLostSignalTransitionShaderProgram{};
+  GLuint m_glzoomInOutTransitionShaderProgram{};
   void render();
   void renderVAAPI();
   void renderCUDACopy();
@@ -91,7 +94,7 @@ private:
   bool m_useTransitions = true;
   GLuint m_requiredTransitionShaderProgram{};
   std::unique_ptr<TransitionState> m_transitionState = nullptr;
-  
+
   // software data for cudac copy and generic nv12 frames
   std::vector<u8> m_hostY;
   std::vector<u8> m_hostUV;
