@@ -64,6 +64,7 @@ struct MonitorSizeMessage {
 
 struct SetWallpaperMessage {
   std::optional<std::string> monitor;
+  std::optional<std::string> transition;
   std::string imgPath;
 };
 struct PlayPauseMessage {

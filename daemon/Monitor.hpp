@@ -12,6 +12,7 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
@@ -40,7 +41,7 @@ public:
   void createAndAttachBuffer();
   std::chrono::steady_clock::time_point m_nextVideoFrame;
   std::unique_ptr<Buffer> m_buffer;
-  WallpaperBindError setWallpaper(std::string img_path);
+  WallpaperBindError setWallpaper(std::string img_path, std::optional<std::string> transition);
   WallpaperBindError restoreWallpaper();
   void setupGl();
   void onFrame(u32 scheduledID);
@@ -87,12 +88,13 @@ private:
   bool m_isFirstAnimationFrame = false;
   bool m_hasPreviousFrame = false;
   bool m_renderIntoTempTexture = false;
-  bool useTransitions = true;
+  bool m_useTransitions = true;
+  GLuint m_requiredTransitionShaderProgram{};
   std::unique_ptr<TransitionState> m_transitionState = nullptr;
   
   // software data for cudac copy and generic nv12 frames
-  std::vector<uint8_t> m_hostY;
-  std::vector<uint8_t> m_hostUV;
+  std::vector<u8> m_hostY;
+  std::vector<u8> m_hostUV;
   float m_lastTextCoordScaleX = 1.0;
   float m_lastTextCoordScaleY = 1.0;
 };

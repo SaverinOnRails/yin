@@ -18,6 +18,7 @@
 #include <libavutil/frame.h>
 #include <libavutil/pixfmt.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/socket.h>
@@ -260,7 +261,7 @@ void Monitor::render() {
   // There is a previous texture to transition from
   // Transitions are enabled
   // There is no active transition
-  if (m_isFirstAnimationFrame && m_hasPreviousFrame && useTransitions &&
+  if (m_isFirstAnimationFrame && m_hasPreviousFrame && m_useTransitions &&
       !m_transitionState) {
     startTransition = true;
     m_renderIntoTempTexture = true;
@@ -292,7 +293,7 @@ void Monitor::render() {
 }
 
 void Monitor::resumeTransition() {
-  GLuint transition = m_glLostSignalTransitionShaderProgram;
+  GLuint transition = m_requiredTransitionShaderProgram;
   glUseProgram(transition);
   glActiveTexture(GL_TEXTURE0);
   glBindTexture(GL_TEXTURE_2D, m_textures[0]);
@@ -308,8 +309,8 @@ void Monitor::resumeTransition() {
   glUniform1i(glGetUniformLocation(transition, "uTexY_to"), 2);
   glUniform1i(glGetUniformLocation(transition, "uTexC_to"), 3);
 
-  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"), m_lastTextCoordScaleX,
-              m_lastTextCoordScaleY);
+  glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
+              m_lastTextCoordScaleX, m_lastTextCoordScaleY);
   auto now = std::chrono::steady_clock::now();
   float progress =
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
@@ -328,8 +329,10 @@ void Monitor::resumeTransition() {
   if (progress >= 1.0f) {
     m_transitionState = nullptr;
   }
-  //we have to do this or future transitions from a static image will be from a stale texture since static images will stop rendering after we nullify m_transitionState
-  if(m_wallpaper->m_isSingleFrame) {
+  // we have to do this or future transitions from a static image will be from a
+  // stale texture since static images will stop rendering after we nullify
+  // m_transitionState
+  if (m_wallpaper->m_isSingleFrame) {
     render();
   }
 }
@@ -589,10 +592,27 @@ std::filesystem::path Monitor::historyFile() {
   auto filename = m_name;
   return cache_dir / filename;
 }
-WallpaperBindError Monitor::setWallpaper(std::string img_path) {
+WallpaperBindError
+Monitor::setWallpaper(std::string img_path,
+                      std::optional<std::string> transition) {
+  // reset state
   m_wallpaper = std::make_unique<Wallpaper>();
   m_wallpaperPlaying = true;
   m_isFirstAnimationFrame = true;
+  m_useTransitions = false;
+  m_requiredTransitionShaderProgram = {};
+  if (transition.has_value()) {
+    auto trans = *transition;
+    m_useTransitions = true;
+    if (trans == "box") {
+      m_requiredTransitionShaderProgram = m_glBoxTransitionShaderProgram;
+    } else if (trans == "static") {
+      m_requiredTransitionShaderProgram = m_glLostSignalTransitionShaderProgram;
+    } else {
+      // just ignore
+      m_useTransitions = false;
+    }
+  }
   auto error = m_wallpaper->bind(img_path, m_daemon.m_vaDisplay,
                                  m_daemon.m_hardwareAccelerationBackend);
   if (error == Success) {
@@ -832,7 +852,7 @@ WallpaperBindError Monitor::restoreWallpaper() {
       return NoHistory;
     if (!std::filesystem::exists(first_line))
       return BadVideo;
-    return setWallpaper(first_line);
+    return setWallpaper(first_line, std::nullopt);
   }
   return NoHistory;
 }

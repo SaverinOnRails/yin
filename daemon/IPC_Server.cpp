@@ -59,7 +59,8 @@ void IPC::serverAccept(Daemon &daemon) {
       auto mes = std::get<SetWallpaperMessage>(message);
 
       auto monitor = daemonFindMonitor(daemon, mes.monitor);
-      auto error = monitor->setWallpaper(mes.imgPath);
+      auto error = monitor->setWallpaper(mes.imgPath, mes.transition);
+
 
       if (error == BadVideo) {
         write(client, bad_video_message, std::strlen(bad_video_message));

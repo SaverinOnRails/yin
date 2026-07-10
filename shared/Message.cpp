@@ -1,6 +1,7 @@
 #include "shared/utils.hpp"
 #include <cstddef>
 #include <iostream>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -13,7 +14,6 @@ std::vector<u8> SerializeMessage(Message &msg) {
 
   if (std::holds_alternative<MonitorSizeMessage>(msg)) {
     auto &m = std::get<MonitorSizeMessage>(msg);
-
     writer.write(MonitorSize);
     writer.writeOptionalMonitor(m.monitor);
   }
@@ -30,6 +30,12 @@ std::vector<u8> SerializeMessage(Message &msg) {
     writer.writeOptionalMonitor(m.monitor);
     writer.writeu32(m.imgPath.length());
     writer.writeString(m.imgPath);
+    if (m.transition.has_value()) {
+      writer.write(static_cast<u8>(m.transition->length()));
+      writer.writeString(*m.transition);
+    } else {
+      writer.write(0);
+    }
   }
   if (std::holds_alternative<RestoreMessage>(msg)) {
     auto &m = std::get<RestoreMessage>(msg);
@@ -55,6 +61,12 @@ Message DeserializeMessage(char *buf, size_t len) {
     SetWallpaperMessage msg = {.monitor = bufReader.readOptionalMonitor()};
     auto img_path_len = bufReader.readu32();
     msg.imgPath = bufReader.readString(img_path_len);
+    auto transLength = bufReader.read();
+    if (transLength != 0) {
+      msg.transition = bufReader.readString(transLength);
+    } else {
+      msg.transition = std::nullopt;
+    }
     return msg;
   };
   case Restore:
