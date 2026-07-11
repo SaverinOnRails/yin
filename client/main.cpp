@@ -1,7 +1,7 @@
+#include "shaders_generated.hpp"
 #include "shared/IPC.hpp"
 #include "shared/utils.hpp"
 #include <cstdlib>
-#include "shaders_generated.hpp"
 #include <filesystem>
 #include <iostream>
 #include <optional>
@@ -60,7 +60,10 @@ int main(int argc, char **argv) {
   process_args(argc, argv);
   if (args.help == true) {
     printHelp();
-  }
+  } else if (args.listTrans) {
+    std::cout << availableTransitions << std::endl;
+    std::exit(1);
+  }else{}
 
   ipc.clientConnect();
   if (args.img_path.has_value()) {
@@ -69,10 +72,7 @@ int main(int argc, char **argv) {
     RestoreWallpaper();
   } else if (args.play.has_value()) {
     PlayPauseWallpaper(*args.play);
-  } else if (args.listTrans) {
-    std::cout << availableTransitions << std::endl;
-  }
-}
+  } }
 
 void printHelp() {
   std::cout << "Usage: " << "yinctl" << " [OPTIONS]\n\n"
