@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
     printHelp();
   } else if (args.listTrans) {
     std::cout << availableTransitions << std::endl;
-    std::exit(1);
+    std::exit(0);
   }else{}
 
   ipc.clientConnect();
@@ -93,7 +93,7 @@ void printHelp() {
             << "  " << "yinctl" << " --pause\n"
             << "  " << "yinctl" << " --play --output DP-1\n"
             << "  " << "yinctl" << " --restore\n";
-  std::exit(1);
+  std::exit(0);
 }
 
 void PlayPauseWallpaper(bool play) {
