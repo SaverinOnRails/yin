@@ -41,16 +41,19 @@ yin
 ```
 
 Then control it with yinctl
+
+
 ```
 yinctl --help
 ```
-https://github.com/user-attachments/assets/552923ae-e535-4461-a34f-fb7d5c7c057a
+https://github.com/user-attachments/assets/57a23e5b-e191-4637-b8a7-483235b95518
+
 
 
 # FEATURES
 - Runtime control via IPC without ever needing to restart the daemon
 - Hardware acceleration , will play anything efficiently.
-- Can play videos, gifs, and static images.
+- Can play videos, and static images.
 - Multi monitor support
 - Runtime pause and play commands
 - GPU based transitions
