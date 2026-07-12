@@ -44,7 +44,7 @@ static void output_scale(void *data, struct wl_output *wl_output,
                          int32_t scale) {
   auto monitor = static_cast<Monitor *>(data);
   monitor->m_scale = scale;
-  // monitor->onScaleChanged();
+  monitor->onScaleChanged();
 }
 
 static void output_name(void *data, struct wl_output *wl_output,
