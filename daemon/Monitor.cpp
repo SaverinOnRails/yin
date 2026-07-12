@@ -341,15 +341,16 @@ void Monitor::resumeTransition() {
 }
 
 void Monitor::stageNV12Buffers(u32 width, u32 height) {
-  m_hostY.resize(static_cast<size_t>(width) * height);
-  m_hostUV.resize(static_cast<size_t>(width) * (height / 2));
 
-  glBindTexture(GL_TEXTURE_2D, m_textures[0]);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
-               GL_UNSIGNED_BYTE, nullptr);
-  glBindTexture(GL_TEXTURE_2D, m_textures[1]);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
-               GL_UNSIGNED_BYTE, nullptr);
+  //do not reset m_textures when we are not rendering into it, or VAAPI -> Software transitions will be broken
+  if (!m_renderIntoTempTexture) {
+    glBindTexture(GL_TEXTURE_2D, m_textures[0]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
+                 GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, m_textures[1]);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RG8, width / 2, height / 2, 0, GL_RG,
+                 GL_UNSIGNED_BYTE, nullptr);
+  }
 
   glBindTexture(GL_TEXTURE_2D, m_toTextures[0]);
   glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
@@ -359,6 +360,12 @@ void Monitor::stageNV12Buffers(u32 width, u32 height) {
                GL_UNSIGNED_BYTE, nullptr);
 
   glBindTexture(GL_TEXTURE_2D, 0);
+  if ((m_hostY.size() == static_cast<size_t>(width) * height) &&
+      (m_hostUV.size() == static_cast<size_t>(width) * (height / 2))) {
+    return;
+  }
+  m_hostY.resize(static_cast<size_t>(width) * height);
+  m_hostUV.resize(static_cast<size_t>(width) * (height / 2));
 }
 
 void Monitor::renderSoftwareNV12() {
@@ -366,10 +373,7 @@ void Monitor::renderSoftwareNV12() {
   int width = frame->width;
   int height = frame->height;
 
-  if (m_hostY.size() != static_cast<size_t>(width) * height) {
-    stageNV12Buffers(width, height);
-  }
-
+  stageNV12Buffers(width, height);
   glUseProgram(m_glShaderProgram);
   glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexY"), 0);
   glUniform1i(glGetUniformLocation(m_glShaderProgram, "uTexC"), 1);
@@ -442,10 +446,7 @@ void Monitor::renderCUDACopy() {
 void Monitor::cudaNV12GLUpload(AVFrame *frame) {
   int width = frame->width;
   int height = frame->height;
-
-  if (m_hostY.size() != static_cast<size_t>(width) * height) {
-    stageNV12Buffers(width, height);
-  }
+  stageNV12Buffers(width, height);
   m_wallpaper->makeCudaContextCurrent();
   {
     CUDA_MEMCPY2D copy = {};
