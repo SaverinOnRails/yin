@@ -1,15 +1,10 @@
 // Author: Adrian Purser
 // License: MIT
-#version 130
-@UNIFORMS
-uniform float progress;
 uniform vec4 shadow_colour =  vec4(0.,0.,0.,.6);
 uniform float shadow_height = 0.075;
 uniform float bounces = 3.0;
 
 const float PI = 3.14159265358;
-@YUV2RGB
-@FUNCTIONS
 
 vec4 transition (vec2 uv) {
   float time = progress;
@@ -32,4 +27,3 @@ vec4 transition (vec2 uv) {
   );
 }
 
-@MAIN

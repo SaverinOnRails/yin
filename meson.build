@@ -48,6 +48,7 @@ python = import('python').find_installation()
 generated_shaders = custom_target(
     'generate_shaders',
     output: 'shaders_generated.hpp',
+    build_always_stale:true,
     command: [
         python,
         files('scripts/gen_shaders.py'),

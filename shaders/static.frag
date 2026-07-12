@@ -1,10 +1,5 @@
 // Author: mernking gitlab: Godswork
 // License: MIT
-#version 130
-@UNIFORMS
-uniform float progress;
-@YUV2RGB
-@FUNCTIONS
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -50,4 +45,3 @@ vec4 transition(vec2 uv) {
   return color;
 }
 
-@MAIN

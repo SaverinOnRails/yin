@@ -1,14 +1,9 @@
-#version 130
 // Author: lql
 // License: MIT
 
-@UNIFORMS
-uniform float progress;
 uniform int rectIn = 1;
 uniform int location = 0;
 
-@YUV2RGB
-@FUNCTIONS
 
 vec4 transition(vec2 uv) {
   float p = rectIn == 1 ? 1.0 - progress : progress;
@@ -26,4 +21,3 @@ vec4 transition(vec2 uv) {
   in_rect = rectIn == 1 ? 1.0 - in_rect : in_rect;
   return mix(getFromColor(uv), getToColor(uv), in_rect);
 }
-@MAIN

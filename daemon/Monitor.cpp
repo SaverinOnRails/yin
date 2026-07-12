@@ -308,6 +308,8 @@ void Monitor::resumeTransition() {
   glUniform1i(glGetUniformLocation(transition, "uTexC_from"), 1);
   glUniform1i(glGetUniformLocation(transition, "uTexY_to"), 2);
   glUniform1i(glGetUniformLocation(transition, "uTexC_to"), 3);
+  glUniform1f(glGetUniformLocation(transition, "ratio"),
+              (static_cast<float>(m_bufferWidth) / m_bufferHeight));
 
   glUniform2f(glGetUniformLocation(m_glShaderProgram, "uTexCoordScale"),
               m_lastTextCoordScaleX, m_lastTextCoordScaleY);
@@ -321,6 +323,7 @@ void Monitor::resumeTransition() {
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
   m_daemon.glBindVertexArray(m_VAO);
+  glClear(GL_COLOR_BUFFER_BIT);
   glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
   if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
     std::cout << eglGetError() << std::endl;
@@ -395,6 +398,7 @@ void Monitor::renderSoftwareNV12() {
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
   if (!m_renderIntoTempTexture) {
+    glClear(GL_COLOR_BUFFER_BIT);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
     if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {
       std::cout << eglGetError() << std::endl;
@@ -426,7 +430,7 @@ void Monitor::renderCUDACopy() {
                                    : m_textures[1]); // UV -> uTexC
 
   if (!m_renderIntoTempTexture) {
-
+    glClear(GL_COLOR_BUFFER_BIT);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
     if (eglSwapBuffers(m_daemon.m_eglDisplay, m_eglSurface) != EGL_TRUE) {

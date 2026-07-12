@@ -1,12 +1,7 @@
-#version 130
 // Author: YueDev
 // License: MIT
 
 uniform float mosaicNum = 10.0;
-uniform float progress;
-@UNIFORMS
-@YUV2RGB
-@FUNCTIONS
 
 vec2 getMosaicUV(vec2 uv) {
   float mosaicWidth = 2.0 / mosaicNum * min(progress, 1.0 - progress);
@@ -19,4 +14,3 @@ vec4 transition (vec2 uv) {
   vec2 mosaicUV = min(progress, 1.0 - progress) == 0.0 ? uv : getMosaicUV(uv);
   return mix(getFromColor(mosaicUV), getToColor(mosaicUV), progress * progress);
 }
-@MAIN

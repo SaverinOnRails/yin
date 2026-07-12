@@ -1,12 +1,7 @@
-#version 130
 // Author: lql
 // License: MIT
 
-@UNIFORMS
 uniform float grid_num = 10.0;
-uniform float progress;
-@YUV2RGB
-@FUNCTIONS
 
 vec4 transition(vec2 uv) {
     vec2 st = uv * grid_num;
@@ -28,4 +23,3 @@ vec4 transition(vec2 uv) {
     return mix(a, b, mixFactor);
 }
 
-@MAIN

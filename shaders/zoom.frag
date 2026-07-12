@@ -1,11 +1,6 @@
 // Author: bread
 // License: MIT
-#version 130
-@UNIFORMS
-uniform float progress;
 
-@YUV2RGB
-@FUNCTIONS
   vec2 zoom(vec2 uv, float amount) {
     return 0.5 + ((uv - 0.5) * (1.0 - amount));
   }
@@ -21,4 +16,3 @@ uniform float progress;
     );
   }
 
-  @MAIN

@@ -1,11 +1,5 @@
 // Author: hong
 // License: MIT
-#version 130
-@UNIFORMS
-uniform float progress;
-
-@YUV2RGB
-@FUNCTIONS
 vec2 skewRight(vec2 p) {
   float skewX = (p.x - progress)/(0.5 - progress) * 0.5;
   float skewY =  (p.y - 0.5)/(0.5 + progress * (p.x - 0.5) / 0.5)* 0.5  + 0.5;
@@ -33,4 +27,3 @@ vec4 transition (vec2 p) {
   }
 }
 
-@MAIN
