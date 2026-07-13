@@ -650,7 +650,7 @@ void Monitor::nextFrame() {
 }
 
 void Monitor::onFrame(u32 scheduledID) {
-  if (scheduledID != m_wallpaperID)
+  if (scheduledID != m_wallpaperID || m_wallpaper == nullptr)
     return;
   auto now = std::chrono::steady_clock::now();
   auto diff = std::chrono::duration_cast<std::chrono::milliseconds>(
