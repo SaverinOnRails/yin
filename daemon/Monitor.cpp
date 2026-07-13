@@ -292,6 +292,13 @@ void Monitor::render() {
   }
 }
 
+static float easeInOutCirc(float x) {
+  x = std::clamp(x, 0.0f, 1.0f);
+  return x < 0.5f
+             ? (1.0f - std::sqrt(1.0f - std::pow(2.0f * x, 2.0f))) / 2.0f
+             : (std::sqrt(1.0f - std::pow(-2.0f * x + 2.0f, 2.0f)) + 1.0f) /
+                   2.0f;
+}
 void Monitor::resumeTransition() {
   GLuint transition = m_requiredTransitionShaderProgram;
   glUseProgram(transition);
@@ -317,9 +324,9 @@ void Monitor::resumeTransition() {
   float progress =
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
       m_transitionState->m_duration;
-  glUniform1f(glGetUniformLocation(transition, "progress"),
-              std::clamp(progress, 0.0f, 1.0f));
-
+  progress = std::clamp(progress, 0.0f, 1.0f);
+  float easedProgress = easeInOutCirc(progress);
+  glUniform1f(glGetUniformLocation(transition, "progress"), easedProgress);
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
   m_daemon.glBindVertexArray(m_VAO);
@@ -342,7 +349,8 @@ void Monitor::resumeTransition() {
 
 void Monitor::stageNV12Buffers(u32 width, u32 height) {
 
-  //do not reset m_textures when we are not rendering into it, or VAAPI -> Software transitions will be broken
+  // do not reset m_textures when we are not rendering into it, or VAAPI ->
+  // Software transitions will be broken
   if (!m_renderIntoTempTexture) {
     glBindTexture(GL_TEXTURE_2D, m_textures[0]);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, width, height, 0, GL_RED,
