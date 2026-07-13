@@ -23,14 +23,17 @@ void cacheVideo(std::string_view file_path, std::string_view write_to,
             << "\"" << write_to << "\"";
     result = std::system(command.str().c_str());
   } else {
-    command << "ffmpeg "
-            << "-y "
-            << "-i \"" << full_path.string() << "\" "
-            << "-vf scale=" << width << ":" << height << " "
-            << "\"" << write_to << "\"";
-
-    result = std::system(command.str().c_str());
+    throw std::runtime_error("Unkown Video format");
   }
+  // else {
+  //   command << "ffmpeg "
+  //           << "-y "
+  //           << "-i \"" << full_path.string() << "\" "
+  //           << "-vf scale=" << width << ":" << height << " "
+  //           << "\"" << write_to << "\"";
+
+  //   result = std::system(command.str().c_str());
+  // }
   if (result != 0) {
     throw std::runtime_error("ffmpeg failed");
   }

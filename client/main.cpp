@@ -108,12 +108,15 @@ void PlayPauseWallpaper(bool play) {
   ipc.clientWrite(payload.data(), payload.size());
 }
 std::string getCachePath(u32 width, u32 height, const std::string &path) {
+  //don't cache image files
   std::filesystem::path input_path(path);
+  if(input_path.extension() != ".mp4" && input_path.extension() != ".mkv") {
+    return path;
+  }
 
   std::string cache_name = std::to_string(width) + "x" +
                            std::to_string(height) + "_" +
                            input_path.filename().string();
-
   const char *home = std::getenv("HOME");
   if (!home)
     throw std::runtime_error("HOME environment variable not set");
