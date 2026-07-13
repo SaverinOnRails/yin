@@ -325,8 +325,8 @@ void Monitor::resumeTransition() {
       std::chrono::duration<float>(now - m_transitionState->m_startTime) /
       m_transitionState->m_duration;
   progress = std::clamp(progress, 0.0f, 1.0f);
-  float easedProgress = easeInOutCirc(progress);
-  glUniform1f(glGetUniformLocation(transition, "progress"), easedProgress);
+  // float easedProgress = easeInOutCirc(progress);
+  glUniform1f(glGetUniformLocation(transition, "progress"), progress);
   glViewport(0, 0, static_cast<GLsizei>(m_bufferWidth),
              static_cast<GLsizei>(m_bufferHeight));
   m_daemon.glBindVertexArray(m_VAO);
