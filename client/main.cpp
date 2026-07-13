@@ -79,7 +79,7 @@ void printHelp() {
             << "Options:\n"
             << "  --img <FILE>        Set the wallpaper to FILE\n"
             << "  --output <MONITOR>  Apply the action to a specific monitor\n"
-            << "                      (defaults to first monitors)\n"
+            << "                      (defaults to first monitor)\n"
             << "  --play              Resume animated wallpaper playback\n"
             << "  --pause             Pause animated wallpaper playback\n"
             << "  --restore           Restore previously cached wallpapers\n"
