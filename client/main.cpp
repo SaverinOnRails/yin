@@ -63,7 +63,8 @@ int main(int argc, char **argv) {
   } else if (args.listTrans) {
     std::cout << availableTransitions << std::endl;
     std::exit(0);
-  }else{}
+  } else {
+  }
 
   ipc.clientConnect();
   if (args.img_path.has_value()) {
@@ -72,7 +73,8 @@ int main(int argc, char **argv) {
     RestoreWallpaper();
   } else if (args.play.has_value()) {
     PlayPauseWallpaper(*args.play);
-  } }
+  }
+}
 
 void printHelp() {
   std::cout << "Usage: " << "yinctl" << " [OPTIONS]\n\n"
@@ -108,10 +110,10 @@ void PlayPauseWallpaper(bool play) {
   ipc.clientWrite(payload.data(), payload.size());
 }
 std::string getCachePath(u32 width, u32 height, const std::string &path) {
-  //don't cache image files
+  // don't cache image files
   std::filesystem::path input_path(path);
-  if(input_path.extension() != ".mp4" && input_path.extension() != ".mkv") {
-    return path;
+  if (input_path.extension() != ".mp4" && input_path.extension() != ".mkv") {
+    return std::filesystem::absolute(path).string();
   }
 
   std::string cache_name = std::to_string(width) + "x" +
