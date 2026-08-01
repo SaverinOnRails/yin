@@ -73,4 +73,8 @@ yin --use-cuda-copy
 ```
 It SHOULD work afterwards, there is an issue concerining implementing zero copy NVDEC support.
 
+##  Support
+If you find this project useful or it adds value to your workflow, please consider donating!
+- [Ko-fi](https://ko-fi.com/nobleeugene).
+
 
