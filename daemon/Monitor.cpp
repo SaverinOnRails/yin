@@ -26,6 +26,7 @@
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#include <vector>
 #include <wayland-client-protocol.h>
 #include <wayland-egl-core.h>
 #include <wayland-egl.h>
@@ -549,7 +550,11 @@ void Monitor::renderVAAPI() {
     if (prime.layers[i].drm_format != formats[i]) {
       throw std::runtime_error("expected DRM format check");
     }
-    EGLint img_attr[] = {
+    // exported surfaces are usually tiled, and a plane at a non-zero offset
+    // can only be located when the modifier comes along with it
+    const uint64_t mod = prime.objects[prime.layers[LAYER].object_index[PLANE]]
+                             .drm_format_modifier;
+    std::vector<EGLint> img_attr = {
         EGL_LINUX_DRM_FOURCC_EXT,
         static_cast<EGLint>(formats[i]),
         EGL_WIDTH,
@@ -561,11 +566,18 @@ void Monitor::renderVAAPI() {
         EGL_DMA_BUF_PLANE0_OFFSET_EXT,
         static_cast<EGLint>(prime.layers[LAYER].offset[PLANE]),
         EGL_DMA_BUF_PLANE0_PITCH_EXT,
-        static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE]),
-        EGL_NONE};
-    m_eglImages[i] =
-        m_daemon.eglCreateImageKHR(m_daemon.m_eglDisplay, EGL_NO_CONTEXT,
-                                   EGL_LINUX_DMA_BUF_EXT, NULL, img_attr);
+        static_cast<EGLint>(prime.layers[LAYER].pitch[PLANE])};
+    if (mod != DRM_FORMAT_MOD_INVALID && m_daemon.m_dmaBufModifiers) {
+      img_attr.insert(img_attr.end(),
+                      {EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+                       static_cast<EGLint>(mod & 0xffffffff),
+                       EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
+                       static_cast<EGLint>(mod >> 32)});
+    }
+    img_attr.push_back(EGL_NONE);
+    m_eglImages[i] = m_daemon.eglCreateImageKHR(
+        m_daemon.m_eglDisplay, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL,
+        img_attr.data());
     if (!m_eglImages[i]) {
       throw std::runtime_error(i ? "chroma eglCreateImageKHR"
                                  : "luma eglCreateImageKHR");

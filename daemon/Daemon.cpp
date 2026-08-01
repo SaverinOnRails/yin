@@ -151,6 +151,10 @@ void Daemon::createEGL() {
     throw std::runtime_error("eglBindAPI failed");
   }
 
+  const char *exts = eglQueryString(m_eglDisplay, EGL_EXTENSIONS);
+  m_dmaBufModifiers =
+      exts && strstr(exts, "EGL_EXT_image_dma_buf_import_modifiers");
+
   constexpr EGLint kConfigAttributes[] = {
       EGL_SURFACE_TYPE,
       EGL_WINDOW_BIT,
