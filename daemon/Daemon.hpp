@@ -43,6 +43,7 @@ public:
   PFNGLBINDVERTEXARRAYPROC glBindVertexArray = nullptr;
   PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData = nullptr;
   HardwareAccelerationBackend m_hardwareAccelerationBackend = Vaapi;
+  bool m_dmaBufModifiers = false;
 
 private:
   wl_compositor *m_waylandCompositor;
